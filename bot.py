@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 
@@ -11,6 +12,7 @@ from dotenv import load_dotenv
 from config_store import DEFAULT_GAME_STATE, InterfaceStore
 
 ENV_PATH = Path(".env")
+BUILDINGS_PATH = Path("content/buildings.json")
 ENV_TEMPLATE = """# Discord bot token from the Discord Developer Portal
 DISCORD_TOKEN=
 
@@ -58,6 +60,15 @@ def format_change(value: int) -> str:
     return f"+{value}" if value > 0 else str(value)
 
 
+def load_building_catalog() -> dict:
+    try:
+        data = json.loads(BUILDINGS_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        print(f"Failed to load building catalog: {exc}")
+        return {"categories": {}}
+    return data if isinstance(data, dict) else {"categories": {}}
+
+
 def make_interface_embed(guild: discord.Guild, state: dict) -> discord.Embed:
     week = int(state.get("week", DEFAULT_GAME_STATE["week"]))
     food = int(state.get("food", DEFAULT_GAME_STATE["food"]))
@@ -91,6 +102,67 @@ def make_interface_embed(guild: discord.Guild, state: dict) -> discord.Embed:
     embed.set_footer(
         text=f"Guild: {guild.name} • Food upkeep: 10 per citizen each week"
     )
+    return embed
+
+
+def make_building_embed(category_id: str) -> discord.Embed:
+    catalog = load_building_catalog()
+    categories = catalog.get("categories", {})
+    category = categories.get(category_id)
+
+    if not isinstance(category, dict):
+        return discord.Embed(
+            title="Aethelgard Buildings",
+            description="Building catalog could not be loaded.",
+        )
+
+    category_name = str(category.get("name", category_id.title()))
+    buildings = category.get("buildings", [])
+
+    lines: list[str] = [
+        f"Browse the **{category_name}** building catalog.",
+        "",
+    ]
+
+    for building in buildings:
+        if not isinstance(building, dict):
+            continue
+
+        name = str(building.get("name", "Unnamed Building"))
+        description = str(building.get("description", ""))
+        cost = building.get("cost", {})
+        materials = cost.get("materials") if isinstance(cost, dict) else None
+        build_time = building.get("build_time_weeks")
+        sustain = building.get("sustain", [])
+        effects = building.get("effects", [])
+
+        lines.append(SEPARATOR)
+        lines.append(f"### {name}")
+        if description:
+            lines.append(description)
+        if materials is not None:
+            lines.append(f"**Building Cost:** {materials} Materials")
+        lines.append(
+            f"**Building Time:** {build_time} week{'s' if build_time != 1 else ''}"
+            if isinstance(build_time, int)
+            else "**Building Time:** Not specified"
+        )
+
+        if sustain:
+            lines.append("**Sustain:**")
+            lines.extend(f"• {item}" for item in sustain)
+
+        if effects:
+            lines.append("**Effects:**")
+            lines.extend(f"• {item}" for item in effects)
+
+        lines.append("")
+
+    embed = discord.Embed(
+        title=f"Aethelgard Buildings • {category_name}",
+        description="\n".join(lines),
+    )
+    embed.set_footer(text="Use the buttons below to change faction pages.")
     return embed
 
 
@@ -311,6 +383,59 @@ class InterfaceView(discord.ui.View):
         )
 
 
+class BuildingCatalogView(discord.ui.View):
+    def __init__(self, active_category: str = "estrus") -> None:
+        super().__init__(timeout=None)
+        for child in self.children:
+            if isinstance(child, discord.ui.Button):
+                child.disabled = child.custom_id == f"aethelgard:buildings:{active_category}"
+
+    async def show_category(self, interaction: discord.Interaction, category_id: str) -> None:
+        await interaction.response.edit_message(
+            embed=make_building_embed(category_id),
+            view=BuildingCatalogView(category_id),
+        )
+
+    @discord.ui.button(
+        label="Purist",
+        style=discord.ButtonStyle.secondary,
+        custom_id="aethelgard:buildings:purist",
+    )
+    async def purist(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button,
+    ) -> None:
+        del button
+        await self.show_category(interaction, "purist")
+
+    @discord.ui.button(
+        label="Evolutionist",
+        style=discord.ButtonStyle.secondary,
+        custom_id="aethelgard:buildings:evolutionist",
+    )
+    async def evolutionist(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button,
+    ) -> None:
+        del button
+        await self.show_category(interaction, "evolutionist")
+
+    @discord.ui.button(
+        label="Estrus Alliance",
+        style=discord.ButtonStyle.secondary,
+        custom_id="aethelgard:buildings:estrus",
+    )
+    async def estrus(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button,
+    ) -> None:
+        del button
+        await self.show_category(interaction, "estrus")
+
+
 @bot.event
 async def on_ready() -> None:
     print(f"Logged in as {bot.user} (ID: {bot.user.id if bot.user else 'unknown'})")
@@ -319,6 +444,7 @@ async def on_ready() -> None:
 @bot.event
 async def setup_hook() -> None:
     bot.add_view(InterfaceView())
+    bot.add_view(BuildingCatalogView())
 
     if GUILD_ID_RAW:
         try:
@@ -394,6 +520,66 @@ async def setup_interface(
     )
 
 
+@bot.tree.command(
+    name="setup_buildings",
+    description="Create or move the Aethelgard building catalog to a channel.",
+)
+@app_commands.describe(channel="Channel that should contain the building catalog")
+@app_commands.checks.has_permissions(manage_guild=True)
+async def setup_buildings(
+    interaction: discord.Interaction,
+    channel: discord.TextChannel | None = None,
+) -> None:
+    if interaction.guild is None:
+        await interaction.response.send_message(
+            "This command can only be used inside a Discord server.",
+            ephemeral=True,
+        )
+        return
+
+    target_channel = channel or interaction.channel
+    if not isinstance(target_channel, discord.TextChannel):
+        await interaction.response.send_message(
+            "Please run this in a text channel or choose a text channel explicitly.",
+            ephemeral=True,
+        )
+        return
+
+    await interaction.response.defer(ephemeral=True)
+
+    existing = store.get(interaction.guild.id)
+    message: discord.Message | None = None
+    default_category = "estrus"
+    view = BuildingCatalogView(default_category)
+
+    if existing and existing.get("building_channel_id") == target_channel.id:
+        try:
+            message = await target_channel.fetch_message(int(existing["building_message_id"]))
+            await message.edit(
+                embed=make_building_embed(default_category),
+                view=view,
+            )
+        except (discord.NotFound, discord.Forbidden, discord.HTTPException, KeyError, ValueError):
+            message = None
+
+    if message is None:
+        message = await target_channel.send(
+            embed=make_building_embed(default_category),
+            view=view,
+        )
+
+    store.set_building_panel(
+        guild_id=interaction.guild.id,
+        channel_id=target_channel.id,
+        message_id=message.id,
+    )
+
+    await interaction.followup.send(
+        f"Building catalog ready in {target_channel.mention}.\nSaved message ID: `{message.id}`",
+        ephemeral=True,
+    )
+
+
 @setup_interface.error
 async def setup_interface_error(
     interaction: discord.Interaction,
@@ -404,6 +590,23 @@ async def setup_interface_error(
     else:
         print(f"/setup_interface error: {error!r}")
         message = "The interface setup failed. Check the bot console for details."
+
+    if interaction.response.is_done():
+        await interaction.followup.send(message, ephemeral=True)
+    else:
+        await interaction.response.send_message(message, ephemeral=True)
+
+
+@setup_buildings.error
+async def setup_buildings_error(
+    interaction: discord.Interaction,
+    error: app_commands.AppCommandError,
+) -> None:
+    if isinstance(error, app_commands.MissingPermissions):
+        message = "You need the **Manage Server** permission to use this command."
+    else:
+        print(f"/setup_buildings error: {error!r}")
+        message = "The building catalog setup failed. Check the bot console for details."
 
     if interaction.response.is_done():
         await interaction.followup.send(message, ephemeral=True)
