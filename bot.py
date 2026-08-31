@@ -37,15 +37,49 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 store = InterfaceStore()
 
 
+def progress_bar(
+    value: int,
+    maximum: int = 100,
+    segments: int = 10,
+    filled: str = "⬜",
+    empty: str = "⬛",
+) -> str:
+    """Build a compact emoji progress bar for Discord embeds."""
+    if maximum <= 0:
+        maximum = 1
+
+    value = max(0, min(value, maximum))
+    filled_segments = round((value / maximum) * segments)
+    empty_segments = segments - filled_segments
+
+    return f"{filled * filled_segments}{empty * empty_segments}  **{value}/{maximum}**"
+
+
 def make_interface_embed(guild: discord.Guild) -> discord.Embed:
     """Temporary interface panel. Replace these placeholders with live game variables later."""
+    faith = 50
+    corruption = 20
+
     embed = discord.Embed(
         title="Aethelgard Interface",
         description="City management interface placeholder.",
     )
+
     embed.add_field(name="Food", value="500", inline=True)
     embed.add_field(name="Materials", value="500", inline=True)
     embed.add_field(name="Citizens", value="20", inline=True)
+
+    embed.add_field(
+        name="Faith",
+        value=progress_bar(faith, filled="⬜"),
+        inline=False,
+    )
+    embed.add_field(
+        name="Corruption",
+        value=progress_bar(corruption, filled="🟪"),
+        inline=False,
+    )
+
     embed.set_footer(
         text=f"Guild: {guild.name} • This panel will later update automatically"
     )
