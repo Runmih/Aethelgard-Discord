@@ -74,3 +74,37 @@ class InterfaceStore:
         data[key] = entry
         self._save_all(data)
         return entry, food_cost
+
+    def reset_game(
+        self,
+        guild_id: int,
+        *,
+        food: int,
+        materials: int,
+        citizens: int,
+        faith: int,
+        corruption: int,
+    ) -> dict[str, Any]:
+        """Reset game variables to a fresh Week 1 while preserving interface IDs."""
+        data = self._load_all()
+        key = str(guild_id)
+        old_entry = data.get(key, {})
+
+        entry: dict[str, Any] = {
+            "week": 1,
+            "food": food,
+            "materials": materials,
+            "citizens": citizens,
+            "faith": faith,
+            "corruption": corruption,
+        }
+
+        if isinstance(old_entry, dict):
+            if "channel_id" in old_entry:
+                entry["channel_id"] = old_entry["channel_id"]
+            if "message_id" in old_entry:
+                entry["message_id"] = old_entry["message_id"]
+
+        data[key] = entry
+        self._save_all(data)
+        return self._normalize(entry)
