@@ -10,7 +10,9 @@
           "cost": {"materials": 300},
           "build_time_weeks": 2,
           "sustain": ["2 Workers", "2 Cum"],
-          "effects": ["+300 Food per week"]
+          "sustain_requirements": {"workers": 2, "cum": 2},
+          "effects": ["+300 Food per week"],
+          "weekly_effects": {"food": 300}
         },
         {
           "id": "ritual_chamber",
@@ -19,7 +21,9 @@
           "cost": {"materials": 300},
           "build_time_weeks": 2,
           "sustain": [],
-          "effects": ["Unlocks rituals"]
+          "sustain_requirements": {},
+          "effects": ["Unlocks rituals"],
+          "weekly_effects": {}
         },
         {
           "id": "purist_clinic",
@@ -28,7 +32,9 @@
           "cost": {"materials": 200},
           "build_time_weeks": null,
           "sustain": ["5 Scientists"],
-          "effects": ["5 Patient Beds"]
+          "sustain_requirements": {"scientists": 5},
+          "effects": ["5 Patient Beds"],
+          "weekly_effects": {}
         }
       ]
     },
@@ -42,7 +48,9 @@
           "cost": {"materials": 300},
           "build_time_weeks": 2,
           "sustain": ["2 Warriors"],
-          "effects": ["+300 Food per week", "Void exposure to the sustaining Warriors"]
+          "sustain_requirements": {"warriors": 2},
+          "effects": ["+300 Food per week", "Void exposure to the sustaining Warriors"],
+          "weekly_effects": {"food": 300}
         },
         {
           "id": "evolutionist_clinic",
@@ -51,7 +59,12 @@
           "cost": {"materials": 200},
           "build_time_weeks": null,
           "sustain": ["3 Scientists", "2 Warriors"],
-          "effects": ["7 Patient Beds", "+1d10 Corruption"]
+          "sustain_requirements": {"scientists": 3, "warriors": 2},
+          "effects": ["7 Patient Beds", "+1d10 Corruption"],
+          "weekly_effects": {},
+          "weekly_rolls": [
+            {"dice": "1d10", "target": "corruption", "operation": "add"}
+          ]
         },
         {
           "id": "potion_factory",
@@ -60,7 +73,9 @@
           "cost": {"materials": 200},
           "build_time_weeks": 2,
           "sustain": ["2 Warriors", "2 Cum"],
-          "effects": ["Reduces Void risk by 20%"]
+          "sustain_requirements": {"warriors": 2, "cum": 2},
+          "effects": ["Reduces Void risk by 20%"],
+          "weekly_effects": {}
         }
       ]
     },
@@ -74,7 +89,9 @@
           "cost": {"materials": 300},
           "build_time_weeks": 2,
           "sustain": ["2 Workers"],
-          "effects": ["+200 Food per week"]
+          "sustain_requirements": {"workers": 2},
+          "effects": ["+200 Food per week"],
+          "weekly_effects": {"food": 200}
         },
         {
           "id": "estrus_clinic",
@@ -83,7 +100,12 @@
           "cost": {"materials": 200},
           "build_time_weeks": null,
           "sustain": ["3 Scientists", "2 Engineers"],
-          "effects": ["7 Patient Beds", "Consumes 1d10 Barrier Energy"]
+          "sustain_requirements": {"scientists": 3, "engineers": 2},
+          "effects": ["7 Patient Beds", "Consumes 1d10 Barrier Energy"],
+          "weekly_effects": {},
+          "weekly_rolls": [
+            {"dice": "1d10", "target": "barrier_energy", "operation": "subtract"}
+          ]
         }
       ]
     }
