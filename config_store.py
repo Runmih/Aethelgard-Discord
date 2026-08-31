@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import random
 from pathlib import Path
 from typing import Any
 
@@ -59,17 +60,12 @@ class InterfaceStore:
         return self._normalize(entry) if entry is not None else None
 
     def set(self, guild_id: int, channel_id: int, message_id: int) -> dict[str, Any]:
-        return self._update(
-            guild_id,
-            lambda entry: entry.update({"channel_id": channel_id, "message_id": message_id}),
-        )
+        return self._update(guild_id, lambda e: e.update({"channel_id": channel_id, "message_id": message_id}))
 
     def set_building_panel(self, guild_id: int, channel_id: int, message_id: int) -> dict[str, Any]:
         return self._update(
             guild_id,
-            lambda entry: entry.update(
-                {"building_channel_id": channel_id, "building_message_id": message_id}
-            ),
+            lambda e: e.update({"building_channel_id": channel_id, "building_message_id": message_id}),
         )
 
     def save_proposal(self, guild_id: int, message_id: int, proposal: dict[str, Any]) -> dict[str, Any]:
@@ -77,7 +73,6 @@ class InterfaceStore:
             proposals = dict(entry.get("proposals", {}))
             proposals[str(message_id)] = proposal
             entry["proposals"] = proposals
-
         return self._update(guild_id, mutate)
 
     def get_proposal(self, guild_id: int, message_id: int) -> dict[str, Any] | None:
@@ -94,9 +89,8 @@ class InterfaceStore:
             nonlocal result
             proposals = dict(entry.get("proposals", {}))
             proposal = proposals.get(str(message_id))
-            if not isinstance(proposal, dict) or proposal.get("status") not in {"proposed", "approved"}:
+            if not isinstance(proposal, dict) or proposal.get("status") != "proposed":
                 return
-
             pro_votes = {int(v) for v in proposal.get("pro_votes", [])}
             con_votes = {int(v) for v in proposal.get("con_votes", [])}
             pro_votes.discard(user_id)
@@ -126,6 +120,9 @@ class InterfaceStore:
             proposals = dict(entry.get("proposals", {}))
             proposal = proposals.get(str(message_id))
             if not isinstance(proposal, dict):
+                return
+            if proposal.get("status") in {"rejected", "constructing", "active"}:
+                result = dict(proposal)
                 return
 
             if not passed:
@@ -171,17 +168,13 @@ class InterfaceStore:
         return result, state
 
     def advance_week(self, guild_id: int, building_lookup: dict[str, dict[str, Any]]) -> tuple[dict[str, Any], dict[str, Any]]:
-        summary: dict[str, Any] = {
-            "food_consumed": 0,
-            "food_produced": 0,
-            "completed": [],
-            "rolls": [],
-        }
+        summary: dict[str, Any] = {"food_consumed": 0, "food_produced": 0, "completed": [], "rolls": []}
 
         def mutate(entry: dict[str, Any]) -> None:
             entry["week"] = max(1, int(entry.get("week", 1))) + 1
             current_week = int(entry["week"])
             buildings = list(entry.get("buildings", []))
+            completed_instance_ids: set[int] = set()
 
             for instance in buildings:
                 if not isinstance(instance, dict):
@@ -189,7 +182,17 @@ class InterfaceStore:
                 if instance.get("status") == "constructing" and int(instance.get("completion_week", 10**9)) <= current_week:
                     instance["status"] = "active"
                     instance["enabled"] = True
+                    completed_instance_ids.add(int(instance.get("instance_id", 0)))
                     summary["completed"].append(str(instance.get("building_id")))
+
+            proposals = dict(entry.get("proposals", {}))
+            for key, proposal in proposals.items():
+                if not isinstance(proposal, dict):
+                    continue
+                if int(proposal.get("building_instance_id", -1)) in completed_instance_ids:
+                    proposal["status"] = "active"
+                    proposals[key] = proposal
+            entry["proposals"] = proposals
 
             food_cost = max(0, int(entry.get("citizens", 0))) * 10
             entry["food"] = max(0, int(entry.get("food", 0)) - food_cost)
@@ -221,16 +224,22 @@ class InterfaceStore:
                         continue
                     if sides <= 0:
                         continue
-                    import random
                     value = random.randint(1, sides)
                     target = str(roll.get("target", ""))
                     operation = str(roll.get("operation", "add"))
-                    if target in entry:
+                    applied = target in entry
+                    if applied:
                         delta = value if operation == "add" else -value
                         entry[target] = int(entry.get(target, 0)) + delta
                         if target in {"faith", "corruption"}:
                             entry[target] = max(0, min(100, int(entry[target])))
-                    summary["rolls"].append({"building_id": instance.get("building_id"), "target": target, "value": value, "operation": operation})
+                    summary["rolls"].append({
+                        "building_id": instance.get("building_id"),
+                        "target": target,
+                        "value": value,
+                        "operation": operation,
+                        "applied": applied,
+                    })
 
             entry["buildings"] = buildings
 
@@ -261,12 +270,7 @@ class InterfaceStore:
             "proposals": {},
         }
         if isinstance(old_entry, dict):
-            for preserved_key in (
-                "channel_id",
-                "message_id",
-                "building_channel_id",
-                "building_message_id",
-            ):
+            for preserved_key in ("channel_id", "message_id", "building_channel_id", "building_message_id"):
                 if preserved_key in old_entry:
                     entry[preserved_key] = old_entry[preserved_key]
         data[key] = entry
