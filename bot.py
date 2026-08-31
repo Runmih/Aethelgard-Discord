@@ -8,7 +8,7 @@ from discord import app_commands
 from discord.ext import commands
 from dotenv import load_dotenv
 
-from config_store import InterfaceStore
+from config_store import DEFAULT_GAME_STATE, InterfaceStore
 
 ENV_PATH = Path(".env")
 ENV_TEMPLATE = """# Discord bot token from the Discord Developer Portal
@@ -55,19 +55,22 @@ def progress_bar(
     return f"{filled * filled_segments}{empty * empty_segments}  **{value}/{maximum}**"
 
 
-def make_interface_embed(guild: discord.Guild) -> discord.Embed:
-    """Temporary interface panel. Replace these placeholders with live game variables later."""
-    faith = 50
-    corruption = 20
+def make_interface_embed(guild: discord.Guild, state: dict) -> discord.Embed:
+    week = int(state.get("week", DEFAULT_GAME_STATE["week"]))
+    food = int(state.get("food", DEFAULT_GAME_STATE["food"]))
+    materials = int(state.get("materials", DEFAULT_GAME_STATE["materials"]))
+    citizens = int(state.get("citizens", DEFAULT_GAME_STATE["citizens"]))
+    faith = int(state.get("faith", DEFAULT_GAME_STATE["faith"]))
+    corruption = int(state.get("corruption", DEFAULT_GAME_STATE["corruption"]))
 
     embed = discord.Embed(
-        title="Aethelgard Interface",
+        title=f"Aethelgard Interface • Week {week}",
         description="City management interface placeholder.",
     )
 
-    embed.add_field(name="Food", value="500", inline=True)
-    embed.add_field(name="Materials", value="500", inline=True)
-    embed.add_field(name="Citizens", value="20", inline=True)
+    embed.add_field(name="Food", value=f"{food}", inline=True)
+    embed.add_field(name="Materials", value=f"{materials}", inline=True)
+    embed.add_field(name="Citizens", value=f"{citizens}", inline=True)
 
     embed.add_field(
         name="Faith",
@@ -81,9 +84,54 @@ def make_interface_embed(guild: discord.Guild) -> discord.Embed:
     )
 
     embed.set_footer(
-        text=f"Guild: {guild.name} • This panel will later update automatically"
+        text=f"Guild: {guild.name} • Food upkeep: 10 per citizen each week"
     )
     return embed
+
+
+class InterfaceView(discord.ui.View):
+    def __init__(self) -> None:
+        super().__init__(timeout=None)
+
+    @discord.ui.button(
+        label="Advance Week",
+        style=discord.ButtonStyle.primary,
+        custom_id="aethelgard:advance_week",
+    )
+    async def advance_week(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button,
+    ) -> None:
+        del button
+
+        if interaction.guild is None:
+            await interaction.response.send_message(
+                "This button only works inside a Discord server.",
+                ephemeral=True,
+            )
+            return
+
+        permissions = getattr(interaction.user, "guild_permissions", None)
+        if permissions is None or not permissions.manage_guild:
+            await interaction.response.send_message(
+                "You need the **Manage Server** permission to advance the week.",
+                ephemeral=True,
+            )
+            return
+
+        state, food_cost = store.advance_week(interaction.guild.id)
+
+        await interaction.response.edit_message(
+            embed=make_interface_embed(interaction.guild, state),
+            view=self,
+        )
+
+        await interaction.followup.send(
+            f"Week advanced to **{state['week']}**. "
+            f"Consumed **{food_cost} Food** for {state['citizens']} citizens.",
+            ephemeral=True,
+        )
 
 
 @bot.event
@@ -93,6 +141,8 @@ async def on_ready() -> None:
 
 @bot.event
 async def setup_hook() -> None:
+    bot.add_view(InterfaceView())
+
     if GUILD_ID_RAW:
         try:
             guild = discord.Object(id=int(GUILD_ID_RAW))
@@ -135,17 +185,25 @@ async def setup_interface(
     await interaction.response.defer(ephemeral=True)
 
     existing = store.get(interaction.guild.id)
+    state = existing or dict(DEFAULT_GAME_STATE)
     message: discord.Message | None = None
+    view = InterfaceView()
 
-    if existing and existing["channel_id"] == target_channel.id:
+    if existing and existing.get("channel_id") == target_channel.id:
         try:
-            message = await target_channel.fetch_message(existing["message_id"])
-            await message.edit(embed=make_interface_embed(interaction.guild))
-        except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+            message = await target_channel.fetch_message(int(existing["message_id"]))
+            await message.edit(
+                embed=make_interface_embed(interaction.guild, state),
+                view=view,
+            )
+        except (discord.NotFound, discord.Forbidden, discord.HTTPException, KeyError, ValueError):
             message = None
 
     if message is None:
-        message = await target_channel.send(embed=make_interface_embed(interaction.guild))
+        message = await target_channel.send(
+            embed=make_interface_embed(interaction.guild, state),
+            view=view,
+        )
 
     store.set(
         guild_id=interaction.guild.id,
