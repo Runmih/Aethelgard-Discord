@@ -59,6 +59,17 @@ class InterfaceStore:
         self._save_all(data)
         return entry
 
+    def set_building_panel(self, guild_id: int, channel_id: int, message_id: int) -> dict[str, Any]:
+        """Save the building catalog location without touching game state."""
+        data = self._load_all()
+        key = str(guild_id)
+        entry = self._normalize(data.get(key))
+        entry["building_channel_id"] = channel_id
+        entry["building_message_id"] = message_id
+        data[key] = entry
+        self._save_all(data)
+        return entry
+
     def advance_week(self, guild_id: int) -> tuple[dict[str, Any], int]:
         """Advance one week and consume 10 Food per citizen."""
         data = self._load_all()
@@ -100,10 +111,14 @@ class InterfaceStore:
         }
 
         if isinstance(old_entry, dict):
-            if "channel_id" in old_entry:
-                entry["channel_id"] = old_entry["channel_id"]
-            if "message_id" in old_entry:
-                entry["message_id"] = old_entry["message_id"]
+            for preserved_key in (
+                "channel_id",
+                "message_id",
+                "building_channel_id",
+                "building_message_id",
+            ):
+                if preserved_key in old_entry:
+                    entry[preserved_key] = old_entry[preserved_key]
 
         data[key] = entry
         self._save_all(data)
