@@ -1,0 +1,91 @@
+{
+  "categories": {
+    "purist": {
+      "name": "Purist",
+      "buildings": [
+        {
+          "id": "purist_farm",
+          "name": "Purist Farm",
+          "description": "A faction-specific farm that produces food.",
+          "cost": {"materials": 300},
+          "build_time_weeks": 2,
+          "sustain": ["2 Workers", "2 Cum"],
+          "effects": ["+300 Food per week"]
+        },
+        {
+          "id": "ritual_chamber",
+          "name": "Ritual Chamber",
+          "description": "Allows the priestess to execute various rituals. Sustained costs depend on the active ritual.",
+          "cost": {"materials": 300},
+          "build_time_weeks": 2,
+          "sustain": [],
+          "effects": ["Unlocks rituals"]
+        },
+        {
+          "id": "purist_clinic",
+          "name": "Purist Clinic",
+          "description": "Basic building to cure patients.",
+          "cost": {"materials": 200},
+          "build_time_weeks": null,
+          "sustain": ["5 Scientists"],
+          "effects": ["5 Patient Beds"]
+        }
+      ]
+    },
+    "evolutionist": {
+      "name": "Evolutionist",
+      "buildings": [
+        {
+          "id": "evolutionist_farm",
+          "name": "Evolutionist Farm",
+          "description": "A faction-specific farm that produces food. Its warriors are deliberately exposed to the Void.",
+          "cost": {"materials": 300},
+          "build_time_weeks": 2,
+          "sustain": ["2 Warriors"],
+          "effects": ["+300 Food per week", "Void exposure to the sustaining Warriors"]
+        },
+        {
+          "id": "evolutionist_clinic",
+          "name": "Evolutionist Clinic",
+          "description": "Basic building to cure patients. A measured dose of Void exposure is used to speed up recovery.",
+          "cost": {"materials": 200},
+          "build_time_weeks": null,
+          "sustain": ["3 Scientists", "2 Warriors"],
+          "effects": ["7 Patient Beds", "+1d10 Corruption"]
+        },
+        {
+          "id": "potion_factory",
+          "name": "Potion Factory",
+          "description": "Allows the creation of potions to help reduce the effects of the Void.",
+          "cost": {"materials": 200},
+          "build_time_weeks": 2,
+          "sustain": ["2 Warriors", "2 Cum"],
+          "effects": ["Reduces Void risk by 20%"]
+        }
+      ]
+    },
+    "estrus": {
+      "name": "Estrus Alliance",
+      "buildings": [
+        {
+          "id": "estrus_farm",
+          "name": "Estrus Farm",
+          "description": "A faction-specific farm that produces food.",
+          "cost": {"materials": 300},
+          "build_time_weeks": 2,
+          "sustain": ["2 Workers"],
+          "effects": ["+200 Food per week"]
+        },
+        {
+          "id": "estrus_clinic",
+          "name": "Estrus Clinic",
+          "description": "Basic building to cure patients. Barrier energy is redirected to speed up recovery.",
+          "cost": {"materials": 200},
+          "build_time_weeks": null,
+          "sustain": ["3 Scientists", "2 Engineers"],
+          "effects": ["7 Patient Beds", "Consumes 1d10 Barrier Energy"]
+        }
+      ]
+    }
+  }
+}
