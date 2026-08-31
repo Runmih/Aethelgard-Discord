@@ -20,7 +20,6 @@ DISCORD_GUILD_ID=
 
 
 def ensure_env_file() -> None:
-    """Create a blank .env template locally if one does not exist."""
     if not ENV_PATH.exists():
         ENV_PATH.write_text(ENV_TEMPLATE, encoding="utf-8")
         print("Created .env. Fill in DISCORD_TOKEN before starting the bot.")
@@ -36,6 +35,8 @@ intents = discord.Intents.default()
 bot = commands.Bot(command_prefix="!", intents=intents)
 store = InterfaceStore()
 
+SEPARATOR = "━━━━━━━━━━━━━━━━━━━━"
+
 
 def progress_bar(
     value: int,
@@ -44,14 +45,12 @@ def progress_bar(
     filled: str = "⬜",
     empty: str = "⬛",
 ) -> str:
-    """Build a compact emoji progress bar for Discord embeds."""
     if maximum <= 0:
         maximum = 1
 
     value = max(0, min(value, maximum))
     filled_segments = round((value / maximum) * segments)
     empty_segments = segments - filled_segments
-
     return f"{filled * filled_segments}{empty * empty_segments}"
 
 
@@ -67,42 +66,179 @@ def make_interface_embed(guild: discord.Guild, state: dict) -> discord.Embed:
     faith = int(state.get("faith", DEFAULT_GAME_STATE["faith"]))
     corruption = int(state.get("corruption", DEFAULT_GAME_STATE["corruption"]))
 
-    # Placeholder weekly modifiers until the actual game rules are implemented.
     faith_weekly_change = 10
     corruption_weekly_change = 10
 
     embed = discord.Embed(
         title=f"Aethelgard Interface • Week {week}",
-        description="City management interface placeholder.",
-    )
-
-    embed.add_field(name="Food", value=f"{food}", inline=True)
-    embed.add_field(name="Materials", value=f"{materials}", inline=True)
-    embed.add_field(name="Citizens", value=f"{citizens}", inline=True)
-
-    embed.add_field(
-        name="Faith",
-        value=(
+        description=(
+            f"**Food:** {food}\n"
+            f"**Materials:** {materials}\n"
+            f"**Citizens:** {citizens}\n\n"
+            f"{SEPARATOR}\n"
+            f"### Faith\n"
             f"**Current:** {faith}/100\n"
             f"**Weekly:** {format_change(faith_weekly_change)}\n"
-            f"{progress_bar(faith, filled='⬜')}"
-        ),
-        inline=True,
-    )
-    embed.add_field(
-        name="Corruption",
-        value=(
+            f"{progress_bar(faith, filled='⬜')}\n\n"
+            f"{SEPARATOR}\n"
+            f"### Corruption\n"
             f"**Current:** {corruption}/100\n"
             f"**Weekly:** {format_change(corruption_weekly_change)}\n"
             f"{progress_bar(corruption, filled='🟪')}"
         ),
-        inline=True,
     )
 
     embed.set_footer(
         text=f"Guild: {guild.name} • Food upkeep: 10 per citizen each week"
     )
     return embed
+
+
+def user_can_manage_guild(interaction: discord.Interaction) -> bool:
+    permissions = getattr(interaction.user, "guild_permissions", None)
+    return bool(permissions and permissions.manage_guild)
+
+
+async def refresh_saved_interface(guild: discord.Guild, state: dict) -> None:
+    channel_id = state.get("channel_id")
+    message_id = state.get("message_id")
+    if not channel_id or not message_id:
+        return
+
+    channel = guild.get_channel(int(channel_id))
+    if not isinstance(channel, discord.TextChannel):
+        try:
+            fetched = await guild.fetch_channel(int(channel_id))
+        except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+            return
+        if not isinstance(fetched, discord.TextChannel):
+            return
+        channel = fetched
+
+    try:
+        message = await channel.fetch_message(int(message_id))
+        await message.edit(embed=make_interface_embed(guild, state), view=InterfaceView())
+    except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+        pass
+
+
+class ResetGameModal(discord.ui.Modal, title="Start a New Aethelgard Game"):
+    food = discord.ui.TextInput(
+        label="Starting Food",
+        default=str(DEFAULT_GAME_STATE["food"]),
+        required=True,
+        max_length=9,
+    )
+    materials = discord.ui.TextInput(
+        label="Starting Materials",
+        default=str(DEFAULT_GAME_STATE["materials"]),
+        required=True,
+        max_length=9,
+    )
+    citizens = discord.ui.TextInput(
+        label="Starting Citizens",
+        default=str(DEFAULT_GAME_STATE["citizens"]),
+        required=True,
+        max_length=7,
+    )
+    faith = discord.ui.TextInput(
+        label="Starting Faith (0-100)",
+        default=str(DEFAULT_GAME_STATE["faith"]),
+        required=True,
+        max_length=3,
+    )
+    corruption = discord.ui.TextInput(
+        label="Starting Corruption (0-100)",
+        default=str(DEFAULT_GAME_STATE["corruption"]),
+        required=True,
+        max_length=3,
+    )
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        if interaction.guild is None or not user_can_manage_guild(interaction):
+            await interaction.response.send_message(
+                "You need the **Manage Server** permission to reset the game.",
+                ephemeral=True,
+            )
+            return
+
+        try:
+            food = int(str(self.food))
+            materials = int(str(self.materials))
+            citizens = int(str(self.citizens))
+            faith = int(str(self.faith))
+            corruption = int(str(self.corruption))
+        except ValueError:
+            await interaction.response.send_message(
+                "All starting variables must be whole numbers.",
+                ephemeral=True,
+            )
+            return
+
+        if food < 0 or materials < 0 or citizens < 0:
+            await interaction.response.send_message(
+                "Food, Materials, and Citizens cannot be negative.",
+                ephemeral=True,
+            )
+            return
+
+        if not 0 <= faith <= 100 or not 0 <= corruption <= 100:
+            await interaction.response.send_message(
+                "Faith and Corruption must be between 0 and 100.",
+                ephemeral=True,
+            )
+            return
+
+        state = store.reset_game(
+            interaction.guild.id,
+            food=food,
+            materials=materials,
+            citizens=citizens,
+            faith=faith,
+            corruption=corruption,
+        )
+
+        await interaction.response.send_message(
+            "New game started at **Week 1** with the supplied starting values.",
+            ephemeral=True,
+        )
+        await refresh_saved_interface(interaction.guild, state)
+
+
+class ResetConfirmView(discord.ui.View):
+    def __init__(self, owner_id: int) -> None:
+        super().__init__(timeout=60)
+        self.owner_id = owner_id
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.owner_id:
+            await interaction.response.send_message(
+                "This reset confirmation belongs to another user.",
+                ephemeral=True,
+            )
+            return False
+        return True
+
+    @discord.ui.button(label="Continue Reset", style=discord.ButtonStyle.danger)
+    async def continue_reset(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button,
+    ) -> None:
+        del button
+        await interaction.response.send_modal(ResetGameModal())
+
+    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
+    async def cancel(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button,
+    ) -> None:
+        del button
+        for child in self.children:
+            child.disabled = True
+        await interaction.response.edit_message(content="Reset cancelled.", view=self)
+        self.stop()
 
 
 class InterfaceView(discord.ui.View):
@@ -128,8 +264,7 @@ class InterfaceView(discord.ui.View):
             )
             return
 
-        permissions = getattr(interaction.user, "guild_permissions", None)
-        if permissions is None or not permissions.manage_guild:
+        if not user_can_manage_guild(interaction):
             await interaction.response.send_message(
                 "You need the **Manage Server** permission to advance the week.",
                 ephemeral=True,
@@ -146,6 +281,32 @@ class InterfaceView(discord.ui.View):
         await interaction.followup.send(
             f"Week advanced to **{state['week']}**. "
             f"Consumed **{food_cost} Food** for {state['citizens']} citizens.",
+            ephemeral=True,
+        )
+
+    @discord.ui.button(
+        label="Reset Game",
+        style=discord.ButtonStyle.danger,
+        custom_id="aethelgard:reset_game",
+    )
+    async def reset_game(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button,
+    ) -> None:
+        del button
+
+        if interaction.guild is None or not user_can_manage_guild(interaction):
+            await interaction.response.send_message(
+                "You need the **Manage Server** permission to reset the game.",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.send_message(
+            "**Reset the Aethelgard game?**\n"
+            "This will replace the current game state. The interface channel and message will be kept.",
+            view=ResetConfirmView(interaction.user.id),
             ephemeral=True,
         )
 
