@@ -52,7 +52,11 @@ def progress_bar(
     filled_segments = round((value / maximum) * segments)
     empty_segments = segments - filled_segments
 
-    return f"{filled * filled_segments}{empty * empty_segments}  **{value}/{maximum}**"
+    return f"{filled * filled_segments}{empty * empty_segments}"
+
+
+def format_change(value: int) -> str:
+    return f"+{value}" if value > 0 else str(value)
 
 
 def make_interface_embed(guild: discord.Guild, state: dict) -> discord.Embed:
@@ -62,6 +66,10 @@ def make_interface_embed(guild: discord.Guild, state: dict) -> discord.Embed:
     citizens = int(state.get("citizens", DEFAULT_GAME_STATE["citizens"]))
     faith = int(state.get("faith", DEFAULT_GAME_STATE["faith"]))
     corruption = int(state.get("corruption", DEFAULT_GAME_STATE["corruption"]))
+
+    # Placeholder weekly modifiers until the actual game rules are implemented.
+    faith_weekly_change = 10
+    corruption_weekly_change = 10
 
     embed = discord.Embed(
         title=f"Aethelgard Interface • Week {week}",
@@ -74,13 +82,21 @@ def make_interface_embed(guild: discord.Guild, state: dict) -> discord.Embed:
 
     embed.add_field(
         name="Faith",
-        value=progress_bar(faith, filled="⬜"),
-        inline=False,
+        value=(
+            f"**Current:** {faith}/100\n"
+            f"**Weekly:** {format_change(faith_weekly_change)}\n"
+            f"{progress_bar(faith, filled='⬜')}"
+        ),
+        inline=True,
     )
     embed.add_field(
         name="Corruption",
-        value=progress_bar(corruption, filled="🟪"),
-        inline=False,
+        value=(
+            f"**Current:** {corruption}/100\n"
+            f"**Weekly:** {format_change(corruption_weekly_change)}\n"
+            f"{progress_bar(corruption, filled='🟪')}"
+        ),
+        inline=True,
     )
 
     embed.set_footer(
