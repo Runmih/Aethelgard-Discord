@@ -59,15 +59,23 @@ def make_interface_embed(guild: discord.Guild, state: dict) -> discord.Embed:
     food = int(state.get("food", DEFAULT_GAME_STATE["food"]))
     materials = int(state.get("materials", DEFAULT_GAME_STATE["materials"]))
     citizens = int(state.get("citizens", DEFAULT_GAME_STATE["citizens"]))
+    children = int(state.get("children", DEFAULT_GAME_STATE["children"]))
     faith = int(state.get("faith", DEFAULT_GAME_STATE["faith"]))
     corruption = int(state.get("corruption", DEFAULT_GAME_STATE["corruption"]))
+    birthrate = int(state.get("birthrate", DEFAULT_GAME_STATE["birthrate"]))
+    growth = int(state.get("growth", DEFAULT_GAME_STATE["growth"]))
 
     embed = discord.Embed(
         title=f"Aethelgard Interface • Week {week}",
         description=(
             f"**Food:** {food} ({format_change(int(weekly.get('food', 0)))}/week)\n"
             f"**Materials:** {materials} ({format_change(int(weekly.get('materials', 0)))}/week)\n"
-            f"**Citizens:** {citizens} ({format_change(int(weekly.get('citizens', 0)))}/week)\n\n"
+            f"**Citizens:** {citizens}\n"
+            f"**Children:** {children}\n\n"
+            f"{SEPARATOR}\n"
+            f"### Population Growth\n"
+            f"**Birthrate:** {birthrate}/100 ({format_change(int(weekly.get('birthrate', 0)))}/week)\n"
+            f"**Growth:** {growth}/728 ({'+1/week while children exist' if children > 0 else 'inactive'})\n\n"
             f"{SEPARATOR}\n"
             f"### Faith\n"
             f"**Current:** {faith}/100\n"
@@ -137,10 +145,10 @@ class WeeklyModal(discord.ui.Modal, title="Weekly Changes"):
         weekly = state.get("weekly", {})
         self.food = discord.ui.TextInput(label="Food / week", default=str(weekly.get("food", 0)), required=True, max_length=9)
         self.materials = discord.ui.TextInput(label="Materials / week", default=str(weekly.get("materials", 0)), required=True, max_length=9)
-        self.citizens = discord.ui.TextInput(label="Citizens / week", default=str(weekly.get("citizens", 0)), required=True, max_length=9)
         self.faith = discord.ui.TextInput(label="Faith / week", default=str(weekly.get("faith", 0)), required=True, max_length=9)
         self.corruption = discord.ui.TextInput(label="Corruption / week", default=str(weekly.get("corruption", 0)), required=True, max_length=9)
-        for item in (self.food, self.materials, self.citizens, self.faith, self.corruption):
+        self.birthrate = discord.ui.TextInput(label="Birthrate / week", default=str(weekly.get("birthrate", 0)), required=True, max_length=9)
+        for item in (self.food, self.materials, self.faith, self.corruption, self.birthrate):
             self.add_item(item)
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
@@ -151,9 +159,9 @@ class WeeklyModal(discord.ui.Modal, title="Weekly Changes"):
             values = {
                 "food": int(str(self.food)),
                 "materials": int(str(self.materials)),
-                "citizens": int(str(self.citizens)),
                 "faith": int(str(self.faith)),
                 "corruption": int(str(self.corruption)),
+                "birthrate": int(str(self.birthrate)),
             }
         except ValueError:
             await interaction.response.send_message("All weekly changes must be whole numbers. Negative values are allowed.", ephemeral=True)
@@ -284,11 +292,17 @@ class InterfaceView(discord.ui.View):
 
         state, summary = store.advance_week(interaction.guild.id)
         await interaction.response.edit_message(embed=make_interface_embed(interaction.guild, state), view=self)
-        await interaction.followup.send(
-            f"Week advanced to **{state['week']}**. Food upkeep: **-{summary['food_upkeep']}**. "
+
+        details = [
+            f"Week advanced to **{state['week']}**.",
+            f"Food upkeep: **-{summary['food_upkeep']}**.",
             f"Weekly Food: **{format_change(summary['food'])}**.",
-            ephemeral=True,
-        )
+        ]
+        if summary["births"]:
+            details.append(f"Births: **+{summary['births']} child{'ren' if summary['births'] != 1 else ''}**.")
+        if summary["matured"]:
+            details.append(f"Matured: **+{summary['matured']} citizen{'s' if summary['matured'] != 1 else ''}**.")
+        await interaction.followup.send("\n".join(details), ephemeral=True)
 
     @discord.ui.button(label="Reset Game", style=discord.ButtonStyle.danger, custom_id="aethelgard:reset_game")
     async def reset_game(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
@@ -353,10 +367,13 @@ async def setup_interface(interaction: discord.Interaction, channel: discord.Tex
         message = await target_channel.send(embed=make_interface_embed(interaction.guild, state), view=view)
 
     store.set(interaction.guild.id, target_channel.id, message.id)
-    await interaction.followup.send(f"Interface panel ready in {target_channel.mention}.", ephemeral=True)
+    await interaction.followup.send(
+        f"Interface panel ready in {target_channel.mention}.\nSaved message ID: `{message.id}`",
+        ephemeral=True,
+    )
 
 
-@bot.tree.command(name="weekly", description="Edit the weekly changes applied when advancing the week.")
+@bot.tree.command(name="weekly", description="Edit the automatic changes applied whenever the week advances.")
 @app_commands.checks.has_permissions(manage_guild=True)
 async def weekly(interaction: discord.Interaction) -> None:
     if interaction.guild is None:
@@ -366,12 +383,57 @@ async def weekly(interaction: discord.Interaction) -> None:
     await interaction.response.send_modal(WeeklyModal(state))
 
 
+RESOURCE_CHOICES = [
+    app_commands.Choice(name="Food", value="food"),
+    app_commands.Choice(name="Materials", value="materials"),
+    app_commands.Choice(name="Faith", value="faith"),
+    app_commands.Choice(name="Corruption", value="corruption"),
+    app_commands.Choice(name="Citizens", value="citizens"),
+    app_commands.Choice(name="Children", value="children"),
+    app_commands.Choice(name="Birthrate", value="birthrate"),
+    app_commands.Choice(name="Growth", value="growth"),
+]
+
+
+@bot.tree.command(name="addresource", description="Admin helper to directly add or subtract a game value.")
+@app_commands.describe(resource_type="Value to change", value="Amount to add. Use a negative number to subtract.")
+@app_commands.choices(resource_type=RESOURCE_CHOICES)
+@app_commands.checks.has_permissions(manage_guild=True)
+async def addresource(
+    interaction: discord.Interaction,
+    resource_type: app_commands.Choice[str],
+    value: int,
+) -> None:
+    if interaction.guild is None:
+        await interaction.response.send_message("This command can only be used inside a Discord server.", ephemeral=True)
+        return
+
+    state, summary = store.add_resource(interaction.guild.id, resource_type.value, value)
+    await refresh_saved_interface(interaction.guild, state)
+
+    details = [
+        f"**{resource_type.name}** changed by **{format_change(value)}**.",
+        f"Current value: **{state[resource_type.value]}**.",
+    ]
+    if summary["births"]:
+        details.append(f"Created **{summary['births']} child{'ren' if summary['births'] != 1 else ''}**.")
+    if summary["matured"]:
+        details.append(f"Matured **{summary['matured']} child{'ren' if summary['matured'] != 1 else ''}** into citizens.")
+
+    await interaction.response.send_message("\n".join(details), ephemeral=True)
+
+
 @bot.tree.command(name="vote", description="Create a simple Pro/Con vote with a required approval percentage.")
 @app_commands.describe(topic="What should people vote on?", required_percentage="Percentage of Pro votes needed to pass")
-async def vote(interaction: discord.Interaction, topic: str, required_percentage: app_commands.Range[int, 1, 100] = 60) -> None:
+async def vote(
+    interaction: discord.Interaction,
+    topic: str,
+    required_percentage: app_commands.Range[int, 1, 100] = 60,
+) -> None:
     if interaction.guild is None or not isinstance(interaction.channel, discord.TextChannel):
         await interaction.response.send_message("This command can only be used in a server text channel.", ephemeral=True)
         return
+
     await interaction.response.defer(ephemeral=True)
     vote_data = {
         "topic": topic,
@@ -388,11 +450,12 @@ async def vote(interaction: discord.Interaction, topic: str, required_percentage
 
 @setup_interface.error
 @weekly.error
-async def manage_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError) -> None:
+@addresource.error
+async def admin_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError) -> None:
     if isinstance(error, app_commands.MissingPermissions):
         message = "You need the **Manage Server** permission to use this command."
     else:
-        print(f"Command error: {error!r}")
+        print(f"Admin command error: {error!r}")
         message = "The command failed. Check the bot console for details."
     if interaction.response.is_done():
         await interaction.followup.send(message, ephemeral=True)
