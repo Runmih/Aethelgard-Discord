@@ -5,6 +5,14 @@ from pathlib import Path
 from typing import Any, Callable
 
 
+DEFAULT_WEEKLY_CHANGES = {
+    "food": 0,
+    "materials": 0,
+    "citizens": 0,
+    "faith": 0,
+    "corruption": 0,
+}
+
 DEFAULT_GAME_STATE = {
     "week": 1,
     "food": 2000,
@@ -12,6 +20,7 @@ DEFAULT_GAME_STATE = {
     "citizens": 20,
     "faith": 50,
     "corruption": 20,
+    "weekly": dict(DEFAULT_WEEKLY_CHANGES),
     "votes": {},
 }
 
@@ -37,6 +46,15 @@ class InterfaceStore:
 
     def _normalize(self, entry: dict[str, Any] | None) -> dict[str, Any]:
         source = entry if isinstance(entry, dict) else {}
+        source_weekly = source.get("weekly", {})
+        if not isinstance(source_weekly, dict):
+            source_weekly = {}
+
+        weekly = {
+            key: int(source_weekly.get(key, default))
+            for key, default in DEFAULT_WEEKLY_CHANGES.items()
+        }
+
         normalized: dict[str, Any] = {
             "week": int(source.get("week", DEFAULT_GAME_STATE["week"])),
             "food": int(source.get("food", DEFAULT_GAME_STATE["food"])),
@@ -44,6 +62,7 @@ class InterfaceStore:
             "citizens": int(source.get("citizens", DEFAULT_GAME_STATE["citizens"])),
             "faith": int(source.get("faith", DEFAULT_GAME_STATE["faith"])),
             "corruption": int(source.get("corruption", DEFAULT_GAME_STATE["corruption"])),
+            "weekly": weekly,
             "votes": source.get("votes", {}) if isinstance(source.get("votes", {}), dict) else {},
         }
 
@@ -78,17 +97,77 @@ class InterfaceStore:
             ),
         )
 
-    def advance_week(self, guild_id: int) -> tuple[dict[str, Any], int]:
-        food_cost = 0
+    def set_weekly_changes(
+        self,
+        guild_id: int,
+        *,
+        food: int,
+        materials: int,
+        citizens: int,
+        faith: int,
+        corruption: int,
+    ) -> dict[str, Any]:
+        return self._update(
+            guild_id,
+            lambda entry: entry.update(
+                {
+                    "weekly": {
+                        "food": food,
+                        "materials": materials,
+                        "citizens": citizens,
+                        "faith": faith,
+                        "corruption": corruption,
+                    }
+                }
+            ),
+        )
+
+    def advance_week(self, guild_id: int) -> tuple[dict[str, Any], dict[str, int]]:
+        summary = {
+            "food_upkeep": 0,
+            "food": 0,
+            "materials": 0,
+            "citizens": 0,
+            "faith": 0,
+            "corruption": 0,
+        }
 
         def mutate(entry: dict[str, Any]) -> None:
-            nonlocal food_cost
+            weekly = entry.get("weekly", DEFAULT_WEEKLY_CHANGES)
             entry["week"] = max(1, int(entry.get("week", 1))) + 1
-            food_cost = max(0, int(entry.get("citizens", 0))) * 10
-            entry["food"] = max(0, int(entry.get("food", 0)) - food_cost)
+
+            summary["food_upkeep"] = max(0, int(entry.get("citizens", 0))) * 10
+            entry["food"] = max(
+                0,
+                int(entry.get("food", 0))
+                - summary["food_upkeep"]
+                + int(weekly.get("food", 0)),
+            )
+            entry["materials"] = max(
+                0,
+                int(entry.get("materials", 0)) + int(weekly.get("materials", 0)),
+            )
+            entry["citizens"] = max(
+                0,
+                int(entry.get("citizens", 0)) + int(weekly.get("citizens", 0)),
+            )
+            entry["faith"] = max(
+                0,
+                min(100, int(entry.get("faith", 0)) + int(weekly.get("faith", 0))),
+            )
+            entry["corruption"] = max(
+                0,
+                min(
+                    100,
+                    int(entry.get("corruption", 0)) + int(weekly.get("corruption", 0)),
+                ),
+            )
+
+            for key in ("food", "materials", "citizens", "faith", "corruption"):
+                summary[key] = int(weekly.get(key, 0))
 
         state = self._update(guild_id, mutate)
-        return state, food_cost
+        return state, summary
 
     def reset_game(
         self,
@@ -111,6 +190,7 @@ class InterfaceStore:
             "citizens": citizens,
             "faith": faith,
             "corruption": corruption,
+            "weekly": dict(DEFAULT_WEEKLY_CHANGES),
             # Votes are standalone helper messages and survive a game reset.
             "votes": old_entry.get("votes", {}),
         }
