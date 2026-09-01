@@ -11,6 +11,7 @@ DEFAULT_WEEKLY_CHANGES = {
     "faith": 0,
     "corruption": 0,
     "birthrate": 0,
+    "growth": 1,
 }
 
 DEFAULT_GAME_STATE = {
@@ -112,6 +113,7 @@ class InterfaceStore:
         faith: int,
         corruption: int,
         birthrate: int,
+        growth: int,
     ) -> dict[str, Any]:
         return self._update(
             guild_id,
@@ -123,6 +125,7 @@ class InterfaceStore:
                         "faith": faith,
                         "corruption": corruption,
                         "birthrate": birthrate,
+                        "growth": growth,
                     }
                 }
             ),
@@ -210,6 +213,7 @@ class InterfaceStore:
         summary = {
             "food_upkeep": 0,
             "food": 0,
+            "food_net": 0,
             "materials": 0,
             "faith": 0,
             "corruption": 0,
@@ -224,12 +228,9 @@ class InterfaceStore:
             entry["week"] = max(1, int(entry.get("week", 1))) + 1
 
             summary["food_upkeep"] = max(0, int(entry.get("citizens", 0))) * 10
-            entry["food"] = max(
-                0,
-                int(entry.get("food", 0))
-                - summary["food_upkeep"]
-                + int(weekly.get("food", 0)),
-            )
+            summary["food"] = int(weekly.get("food", 0))
+            summary["food_net"] = summary["food"] - summary["food_upkeep"]
+            entry["food"] = max(0, int(entry.get("food", 0)) + summary["food_net"])
             entry["materials"] = max(
                 0,
                 int(entry.get("materials", 0)) + int(weekly.get("materials", 0)),
@@ -250,11 +251,12 @@ class InterfaceStore:
             summary["birthrate"] = birth_change
             summary["births"] = self._apply_birthrate(entry, birth_change)
 
+            growth_change = int(weekly.get("growth", 1))
             if int(entry.get("children", 0)) > 0:
-                summary["growth"] = 1
-                summary["matured"] = self._apply_growth(entry, 1)
+                summary["growth"] = growth_change
+                summary["matured"] = self._apply_growth(entry, growth_change)
 
-            for key in ("food", "materials", "faith", "corruption"):
+            for key in ("materials", "faith", "corruption"):
                 summary[key] = int(weekly.get(key, 0))
 
         state = self._update(guild_id, mutate)
