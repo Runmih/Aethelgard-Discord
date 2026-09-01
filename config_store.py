@@ -12,6 +12,7 @@ DEFAULT_WEEKLY_CHANGES = {
     "corruption": 0,
     "birthrate": 0,
     "growth": 1,
+    "cum": 7,
 }
 
 DEFAULT_GAME_STATE = {
@@ -24,6 +25,11 @@ DEFAULT_GAME_STATE = {
     "corruption": 20,
     "birthrate": 0,
     "growth": 0,
+    "barrier": 0,
+    "void_pressure": 0,
+    "nourishment": 0,
+    "crime": 0,
+    "cum": 0,
     "weekly": dict(DEFAULT_WEEKLY_CHANGES),
     "votes": {},
 }
@@ -69,6 +75,11 @@ class InterfaceStore:
             "corruption": max(0, min(100, int(source.get("corruption", DEFAULT_GAME_STATE["corruption"])))),
             "birthrate": max(0, int(source.get("birthrate", DEFAULT_GAME_STATE["birthrate"]))) % 100,
             "growth": max(0, int(source.get("growth", DEFAULT_GAME_STATE["growth"]))) % 728,
+            "barrier": max(0, min(100, int(source.get("barrier", DEFAULT_GAME_STATE["barrier"])))),
+            "void_pressure": max(0, min(9999, int(source.get("void_pressure", DEFAULT_GAME_STATE["void_pressure"])))),
+            "nourishment": max(0, min(100, int(source.get("nourishment", DEFAULT_GAME_STATE["nourishment"])))),
+            "crime": max(0, min(100, int(source.get("crime", DEFAULT_GAME_STATE["crime"])))),
+            "cum": 0,
             "weekly": weekly,
             "votes": source.get("votes", {}) if isinstance(source.get("votes", {}), dict) else {},
         }
@@ -114,6 +125,7 @@ class InterfaceStore:
         corruption: int,
         birthrate: int,
         growth: int,
+        cum: int,
     ) -> dict[str, Any]:
         return self._update(
             guild_id,
@@ -126,6 +138,7 @@ class InterfaceStore:
                         "corruption": corruption,
                         "birthrate": birthrate,
                         "growth": growth,
+                        "cum": cum,
                     }
                 }
             ),
@@ -184,6 +197,12 @@ class InterfaceStore:
             "birthrate": "birthrate",
             "growth": "growth",
             "growthrate": "growth",
+            "barrier": "barrier",
+            "void": "void_pressure",
+            "voidpressure": "void_pressure",
+            "void_pressure": "void_pressure",
+            "nourishment": "nourishment",
+            "crime": "crime",
         }
         target = aliases.get(resource_type.strip().lower())
         if target is None:
@@ -199,8 +218,10 @@ class InterfaceStore:
 
             current = int(entry.get(target, 0))
             new_value = current + value
-            if target in {"faith", "corruption"}:
+            if target in {"faith", "corruption", "barrier", "nourishment", "crime"}:
                 entry[target] = max(0, min(100, new_value))
+            elif target == "void_pressure":
+                entry[target] = max(0, min(9999, new_value))
             else:
                 entry[target] = max(0, new_value)
                 if target == "children" and entry[target] == 0:
@@ -221,6 +242,7 @@ class InterfaceStore:
             "births": 0,
             "growth": 0,
             "matured": 0,
+            "cum": 0,
         }
 
         def mutate(entry: dict[str, Any]) -> None:
@@ -241,10 +263,7 @@ class InterfaceStore:
             )
             entry["corruption"] = max(
                 0,
-                min(
-                    100,
-                    int(entry.get("corruption", 0)) + int(weekly.get("corruption", 0)),
-                ),
+                min(100, int(entry.get("corruption", 0)) + int(weekly.get("corruption", 0))),
             )
 
             birth_change = int(weekly.get("birthrate", 0))
@@ -255,6 +274,9 @@ class InterfaceStore:
             if int(entry.get("children", 0)) > 0:
                 summary["growth"] = growth_change
                 summary["matured"] = self._apply_growth(entry, growth_change)
+
+            summary["cum"] = int(weekly.get("cum", 7))
+            entry["cum"] = 0
 
             for key in ("materials", "faith", "corruption"):
                 summary[key] = int(weekly.get(key, 0))
@@ -286,6 +308,11 @@ class InterfaceStore:
             "corruption": corruption,
             "birthrate": 0,
             "growth": 0,
+            "barrier": 0,
+            "void_pressure": 0,
+            "nourishment": 0,
+            "crime": 0,
+            "cum": 0,
             "weekly": dict(DEFAULT_WEEKLY_CHANGES),
             "votes": old_entry.get("votes", {}),
         }
