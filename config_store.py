@@ -8,11 +8,15 @@ from typing import Any, Callable
 DEFAULT_WEEKLY_CHANGES = {
     "food": 0,
     "materials": 0,
-    "faith": 0,
-    "corruption": 0,
+    "cum": 7,
     "birthrate": 0,
     "growth": 1,
-    "cum": 7,
+    "nourishment": 0,
+    "crime": 0,
+    "faith": 0,
+    "barrier": 0,
+    "void_pressure": 0,
+    "corruption": 0,
 }
 
 DEFAULT_GAME_STATE = {
@@ -49,10 +53,7 @@ class InterfaceStore:
         return data if isinstance(data, dict) else {}
 
     def _save_all(self, data: dict[str, dict[str, Any]]) -> None:
-        self.path.write_text(
-            json.dumps(data, indent=2, sort_keys=True),
-            encoding="utf-8",
-        )
+        self.path.write_text(json.dumps(data, indent=2, sort_keys=True), encoding="utf-8")
 
     def _normalize(self, entry: dict[str, Any] | None) -> dict[str, Any]:
         source = entry if isinstance(entry, dict) else {}
@@ -66,35 +67,29 @@ class InterfaceStore:
         }
 
         normalized: dict[str, Any] = {
-            "week": int(source.get("week", DEFAULT_GAME_STATE["week"])),
-            "food": max(0, int(source.get("food", DEFAULT_GAME_STATE["food"]))),
-            "materials": max(0, int(source.get("materials", DEFAULT_GAME_STATE["materials"]))),
-            "citizens": max(0, int(source.get("citizens", DEFAULT_GAME_STATE["citizens"]))),
-            "children": max(0, int(source.get("children", DEFAULT_GAME_STATE["children"]))),
-            "faith": max(0, min(100, int(source.get("faith", DEFAULT_GAME_STATE["faith"])))),
-            "corruption": max(0, min(100, int(source.get("corruption", DEFAULT_GAME_STATE["corruption"])))),
-            "birthrate": max(0, int(source.get("birthrate", DEFAULT_GAME_STATE["birthrate"]))) % 100,
-            "growth": max(0, int(source.get("growth", DEFAULT_GAME_STATE["growth"]))) % 728,
-            "barrier": max(0, min(100, int(source.get("barrier", DEFAULT_GAME_STATE["barrier"])))),
-            "void_pressure": max(0, min(9999, int(source.get("void_pressure", DEFAULT_GAME_STATE["void_pressure"])))),
-            "nourishment": max(0, min(100, int(source.get("nourishment", DEFAULT_GAME_STATE["nourishment"])))),
-            "crime": max(0, min(100, int(source.get("crime", DEFAULT_GAME_STATE["crime"])))),
+            "week": int(source.get("week", 1)),
+            "food": max(0, int(source.get("food", 2000))),
+            "materials": max(0, int(source.get("materials", 500))),
+            "citizens": max(0, int(source.get("citizens", 20))),
+            "children": max(0, int(source.get("children", 0))),
+            "faith": max(0, min(100, int(source.get("faith", 50)))),
+            "corruption": max(0, min(100, int(source.get("corruption", 20)))),
+            "birthrate": max(0, int(source.get("birthrate", 0))) % 100,
+            "growth": max(0, int(source.get("growth", 0))) % 728,
+            "barrier": max(0, min(100, int(source.get("barrier", 0)))),
+            "void_pressure": max(0, min(9999, int(source.get("void_pressure", 0)))),
+            "nourishment": max(0, min(100, int(source.get("nourishment", 0)))),
+            "crime": max(0, min(100, int(source.get("crime", 0)))),
             "cum": 0,
             "weekly": weekly,
             "votes": source.get("votes", {}) if isinstance(source.get("votes", {}), dict) else {},
         }
-
         for key in ("channel_id", "message_id"):
             if key in source:
                 normalized[key] = source[key]
-
         return normalized
 
-    def _update(
-        self,
-        guild_id: int,
-        mutator: Callable[[dict[str, Any]], None],
-    ) -> dict[str, Any]:
+    def _update(self, guild_id: int, mutator: Callable[[dict[str, Any]], None]) -> dict[str, Any]:
         data = self._load_all()
         key = str(guild_id)
         entry = self._normalize(data.get(key))
@@ -108,49 +103,27 @@ class InterfaceStore:
         return self._normalize(entry) if entry is not None else None
 
     def set(self, guild_id: int, channel_id: int, message_id: int) -> dict[str, Any]:
-        return self._update(
-            guild_id,
-            lambda entry: entry.update(
-                {"channel_id": channel_id, "message_id": message_id}
-            ),
-        )
+        return self._update(guild_id, lambda e: e.update({"channel_id": channel_id, "message_id": message_id}))
 
-    def set_weekly_changes(
-        self,
-        guild_id: int,
-        *,
-        food: int,
-        materials: int,
-        faith: int,
-        corruption: int,
-        birthrate: int,
-        growth: int,
-        cum: int,
-    ) -> dict[str, Any]:
-        return self._update(
-            guild_id,
-            lambda entry: entry.update(
-                {
-                    "weekly": {
-                        "food": food,
-                        "materials": materials,
-                        "faith": faith,
-                        "corruption": corruption,
-                        "birthrate": birthrate,
-                        "growth": growth,
-                        "cum": cum,
-                    }
-                }
-            ),
-        )
+    def set_weekly_group(self, guild_id: int, **changes: int) -> dict[str, Any]:
+        invalid = set(changes) - set(DEFAULT_WEEKLY_CHANGES)
+        if invalid:
+            raise ValueError(f"Unknown weekly values: {', '.join(sorted(invalid))}")
+
+        def mutate(entry: dict[str, Any]) -> None:
+            weekly = dict(entry.get("weekly", DEFAULT_WEEKLY_CHANGES))
+            for key, value in changes.items():
+                weekly[key] = int(value)
+            entry["weekly"] = weekly
+
+        return self._update(guild_id, mutate)
 
     @staticmethod
     def _apply_birthrate(entry: dict[str, Any], change: int) -> int:
         total = max(0, int(entry.get("birthrate", 0)) + change)
         births, remainder = divmod(total, 100)
         entry["birthrate"] = remainder
-        if births > 0:
-            entry["children"] = max(0, int(entry.get("children", 0))) + births
+        entry["children"] = max(0, int(entry.get("children", 0))) + births
         return births
 
     @staticmethod
@@ -161,48 +134,23 @@ class InterfaceStore:
             return 0
 
         total = max(0, int(entry.get("growth", 0)) + change)
-        possible_maturations, remainder = divmod(total, 728)
-        matured = min(children, possible_maturations)
-
-        if matured > 0:
-            entry["children"] = children - matured
-            entry["citizens"] = max(0, int(entry.get("citizens", 0))) + matured
-
-        if int(entry.get("children", 0)) <= 0:
-            entry["growth"] = 0
-        else:
-            entry["growth"] = remainder
-
+        possible, remainder = divmod(total, 728)
+        matured = min(children, possible)
+        entry["children"] = children - matured
+        entry["citizens"] = max(0, int(entry.get("citizens", 0))) + matured
+        entry["growth"] = remainder if entry["children"] > 0 else 0
         return matured
 
-    def add_resource(
-        self,
-        guild_id: int,
-        resource_type: str,
-        value: int,
-    ) -> tuple[dict[str, Any], dict[str, int]]:
+    def add_resource(self, guild_id: int, resource_type: str, value: int) -> tuple[dict[str, Any], dict[str, int]]:
         summary = {"births": 0, "matured": 0}
-
         aliases = {
-            "material": "materials",
-            "materials": "materials",
-            "food": "food",
-            "faith": "faith",
-            "corruption": "corruption",
-            "citizen": "citizens",
-            "citizens": "citizens",
-            "child": "children",
-            "children": "children",
-            "birth": "birthrate",
-            "birthrate": "birthrate",
-            "growth": "growth",
-            "growthrate": "growth",
-            "barrier": "barrier",
-            "void": "void_pressure",
-            "voidpressure": "void_pressure",
-            "void_pressure": "void_pressure",
-            "nourishment": "nourishment",
-            "crime": "crime",
+            "material": "materials", "materials": "materials", "food": "food",
+            "faith": "faith", "corruption": "corruption", "citizen": "citizens",
+            "citizens": "citizens", "child": "children", "children": "children",
+            "birth": "birthrate", "birthrate": "birthrate", "growth": "growth",
+            "growthrate": "growth", "barrier": "barrier", "void": "void_pressure",
+            "voidpressure": "void_pressure", "void_pressure": "void_pressure",
+            "nourishment": "nourishment", "crime": "crime",
         }
         target = aliases.get(resource_type.strip().lower())
         if target is None:
@@ -216,8 +164,7 @@ class InterfaceStore:
                 summary["matured"] = self._apply_growth(entry, value)
                 return
 
-            current = int(entry.get(target, 0))
-            new_value = current + value
+            new_value = int(entry.get(target, 0)) + value
             if target in {"faith", "corruption", "barrier", "nourishment", "crime"}:
                 entry[target] = max(0, min(100, new_value))
             elif target == "void_pressure":
@@ -227,115 +174,57 @@ class InterfaceStore:
                 if target == "children" and entry[target] == 0:
                     entry["growth"] = 0
 
-        state = self._update(guild_id, mutate)
-        return state, summary
+        return self._update(guild_id, mutate), summary
 
     def advance_week(self, guild_id: int) -> tuple[dict[str, Any], dict[str, int]]:
-        summary = {
-            "food_upkeep": 0,
-            "food": 0,
-            "food_net": 0,
-            "materials": 0,
-            "faith": 0,
-            "corruption": 0,
-            "birthrate": 0,
-            "births": 0,
-            "growth": 0,
-            "matured": 0,
-            "cum": 0,
-        }
+        summary = {"births": 0, "matured": 0}
 
         def mutate(entry: dict[str, Any]) -> None:
             weekly = entry.get("weekly", DEFAULT_WEEKLY_CHANGES)
             entry["week"] = max(1, int(entry.get("week", 1))) + 1
 
-            summary["food_upkeep"] = max(0, int(entry.get("citizens", 0))) * 10
-            summary["food"] = int(weekly.get("food", 0))
-            summary["food_net"] = summary["food"] - summary["food_upkeep"]
-            entry["food"] = max(0, int(entry.get("food", 0)) + summary["food_net"])
-            entry["materials"] = max(
-                0,
-                int(entry.get("materials", 0)) + int(weekly.get("materials", 0)),
-            )
-            entry["faith"] = max(
-                0,
-                min(100, int(entry.get("faith", 0)) + int(weekly.get("faith", 0))),
-            )
-            entry["corruption"] = max(
-                0,
-                min(100, int(entry.get("corruption", 0)) + int(weekly.get("corruption", 0))),
-            )
+            food_net = int(weekly.get("food", 0)) - (max(0, int(entry.get("citizens", 0))) * 10)
+            entry["food"] = max(0, int(entry.get("food", 0)) + food_net)
+            entry["materials"] = max(0, int(entry.get("materials", 0)) + int(weekly.get("materials", 0)))
 
-            birth_change = int(weekly.get("birthrate", 0))
-            summary["birthrate"] = birth_change
-            summary["births"] = self._apply_birthrate(entry, birth_change)
+            entry["faith"] = max(0, min(100, int(entry.get("faith", 0)) + int(weekly.get("faith", 0))))
+            entry["corruption"] = max(0, min(100, int(entry.get("corruption", 0)) + int(weekly.get("corruption", 0))))
+            entry["nourishment"] = max(0, min(100, int(entry.get("nourishment", 0)) + int(weekly.get("nourishment", 0))))
+            entry["crime"] = max(0, min(100, int(entry.get("crime", 0)) + int(weekly.get("crime", 0))))
+            entry["barrier"] = max(0, min(100, int(entry.get("barrier", 0)) + int(weekly.get("barrier", 0))))
+            entry["void_pressure"] = max(0, min(9999, int(entry.get("void_pressure", 0)) + int(weekly.get("void_pressure", 0))))
 
-            growth_change = int(weekly.get("growth", 1))
+            summary["births"] = self._apply_birthrate(entry, int(weekly.get("birthrate", 0)))
             if int(entry.get("children", 0)) > 0:
-                summary["growth"] = growth_change
-                summary["matured"] = self._apply_growth(entry, growth_change)
+                summary["matured"] = self._apply_growth(entry, int(weekly.get("growth", 1)))
 
-            summary["cum"] = int(weekly.get("cum", 7))
             entry["cum"] = 0
 
-            for key in ("materials", "faith", "corruption"):
-                summary[key] = int(weekly.get(key, 0))
+        return self._update(guild_id, mutate), summary
 
-        state = self._update(guild_id, mutate)
-        return state, summary
-
-    def reset_game(
-        self,
-        guild_id: int,
-        *,
-        food: int,
-        materials: int,
-        citizens: int,
-        faith: int,
-        corruption: int,
-    ) -> dict[str, Any]:
+    def reset_game(self, guild_id: int, *, food: int, materials: int, citizens: int, faith: int, corruption: int) -> dict[str, Any]:
         data = self._load_all()
         key = str(guild_id)
         old_entry = self._normalize(data.get(key))
-
         entry: dict[str, Any] = {
-            "week": 1,
-            "food": food,
-            "materials": materials,
-            "citizens": citizens,
-            "children": 0,
-            "faith": faith,
-            "corruption": corruption,
-            "birthrate": 0,
-            "growth": 0,
-            "barrier": 0,
-            "void_pressure": 0,
-            "nourishment": 0,
-            "crime": 0,
-            "cum": 0,
-            "weekly": dict(DEFAULT_WEEKLY_CHANGES),
+            "week": 1, "food": food, "materials": materials, "citizens": citizens,
+            "children": 0, "faith": faith, "corruption": corruption, "birthrate": 0,
+            "growth": 0, "barrier": 0, "void_pressure": 0, "nourishment": 0,
+            "crime": 0, "cum": 0, "weekly": dict(DEFAULT_WEEKLY_CHANGES),
             "votes": old_entry.get("votes", {}),
         }
-
         for preserved_key in ("channel_id", "message_id"):
             if preserved_key in old_entry:
                 entry[preserved_key] = old_entry[preserved_key]
-
         data[key] = entry
         self._save_all(data)
         return self._normalize(entry)
 
-    def save_vote(
-        self,
-        guild_id: int,
-        message_id: int,
-        vote: dict[str, Any],
-    ) -> dict[str, Any]:
+    def save_vote(self, guild_id: int, message_id: int, vote: dict[str, Any]) -> dict[str, Any]:
         def mutate(entry: dict[str, Any]) -> None:
             votes = dict(entry.get("votes", {}))
             votes[str(message_id)] = vote
             entry["votes"] = votes
-
         return self._update(guild_id, mutate)
 
     def get_vote(self, guild_id: int, message_id: int) -> dict[str, Any] | None:
@@ -345,62 +234,32 @@ class InterfaceStore:
         vote = state.get("votes", {}).get(str(message_id))
         return dict(vote) if isinstance(vote, dict) else None
 
-    def cast_vote(
-        self,
-        guild_id: int,
-        message_id: int,
-        user_id: int,
-        choice: str,
-    ) -> dict[str, Any] | None:
+    def cast_vote(self, guild_id: int, message_id: int, user_id: int, choice: str) -> dict[str, Any] | None:
         result: dict[str, Any] | None = None
-
         def mutate(entry: dict[str, Any]) -> None:
             nonlocal result
             votes = dict(entry.get("votes", {}))
             vote = votes.get(str(message_id))
             if not isinstance(vote, dict) or vote.get("status") != "open":
                 return
-
             pro_votes = {int(v) for v in vote.get("pro_votes", [])}
             con_votes = {int(v) for v in vote.get("con_votes", [])}
-            pro_votes.discard(user_id)
-            con_votes.discard(user_id)
-
-            if choice == "pro":
-                pro_votes.add(user_id)
-            elif choice == "con":
-                con_votes.add(user_id)
-            else:
-                return
-
-            vote["pro_votes"] = sorted(pro_votes)
-            vote["con_votes"] = sorted(con_votes)
-            votes[str(message_id)] = vote
-            entry["votes"] = votes
-            result = dict(vote)
-
+            pro_votes.discard(user_id); con_votes.discard(user_id)
+            (pro_votes if choice == "pro" else con_votes).add(user_id)
+            vote["pro_votes"] = sorted(pro_votes); vote["con_votes"] = sorted(con_votes)
+            votes[str(message_id)] = vote; entry["votes"] = votes; result = dict(vote)
         self._update(guild_id, mutate)
         return result
 
-    def conclude_vote(
-        self,
-        guild_id: int,
-        message_id: int,
-        passed: bool,
-    ) -> dict[str, Any] | None:
+    def conclude_vote(self, guild_id: int, message_id: int, passed: bool) -> dict[str, Any] | None:
         result: dict[str, Any] | None = None
-
         def mutate(entry: dict[str, Any]) -> None:
             nonlocal result
             votes = dict(entry.get("votes", {}))
             vote = votes.get(str(message_id))
             if not isinstance(vote, dict) or vote.get("status") != "open":
                 return
-
             vote["status"] = "passed" if passed else "failed"
-            votes[str(message_id)] = vote
-            entry["votes"] = votes
-            result = dict(vote)
-
+            votes[str(message_id)] = vote; entry["votes"] = votes; result = dict(vote)
         self._update(guild_id, mutate)
         return result
