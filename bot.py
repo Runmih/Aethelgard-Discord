@@ -64,11 +64,17 @@ def make_interface_embed(guild: discord.Guild, state: dict) -> discord.Embed:
     corruption = int(state.get("corruption", DEFAULT_GAME_STATE["corruption"]))
     birthrate = int(state.get("birthrate", DEFAULT_GAME_STATE["birthrate"]))
     growth = int(state.get("growth", DEFAULT_GAME_STATE["growth"]))
+    barrier = int(state.get("barrier", DEFAULT_GAME_STATE["barrier"]))
+    void_pressure = int(state.get("void_pressure", DEFAULT_GAME_STATE["void_pressure"]))
+    nourishment = int(state.get("nourishment", DEFAULT_GAME_STATE["nourishment"]))
+    crime = int(state.get("crime", DEFAULT_GAME_STATE["crime"]))
+    cum = int(state.get("cum", DEFAULT_GAME_STATE["cum"]))
 
     food_income = int(weekly.get("food", 0))
     food_consumption = citizens * 10
     food_net = food_income - food_consumption
     growth_weekly = int(weekly.get("growth", 1))
+    cum_weekly = int(weekly.get("cum", 7))
 
     embed = discord.Embed(
         title=f"Aethelgard Interface • Week {week}",
@@ -76,12 +82,26 @@ def make_interface_embed(guild: discord.Guild, state: dict) -> discord.Embed:
             f"**Food:** {food} ({format_change(food_net)}/week)\n"
             f"↳ Income: {format_change(food_income)} | Consumption: -{food_consumption}\n"
             f"**Materials:** {materials} ({format_change(int(weekly.get('materials', 0)))}/week)\n"
+            f"**Cum:** {cum} ({format_change(cum_weekly)}/week, not stockpiled)\n"
             f"**Citizens:** {citizens}\n"
             f"**Children:** {children}\n\n"
             f"{SEPARATOR}\n"
             f"### Population Growth\n"
             f"**Birthrate:** {birthrate}/100 ({format_change(int(weekly.get('birthrate', 0)))}/week)\n"
             f"**Growth:** {growth}/728 ({format_change(growth_weekly)}/week while children exist)\n\n"
+            f"{SEPARATOR}\n"
+            f"### Barrier\n"
+            f"**Barrier:** {barrier}/100\n"
+            f"{progress_bar(barrier, filled='🟦')}\n"
+            f"**Void Pressure:** {void_pressure}/9999\n\n"
+            f"{SEPARATOR}\n"
+            f"### Nourishment\n"
+            f"**Current:** {nourishment}/100\n"
+            f"{progress_bar(nourishment, filled='🟩')}\n\n"
+            f"{SEPARATOR}\n"
+            f"### Crime\n"
+            f"**Current:** {crime}/100\n"
+            f"{progress_bar(crime, filled='🟥')}\n\n"
             f"{SEPARATOR}\n"
             f"### Faith\n"
             f"**Current:** {faith}/100\n"
@@ -146,9 +166,10 @@ def make_vote_embed(vote: dict) -> discord.Embed:
 
 
 class WeeklyModal(discord.ui.Modal, title="Weekly Changes"):
-    def __init__(self, state: dict, growth_override: int | None = None) -> None:
+    def __init__(self, state: dict, growth_override: int | None = None, cum_override: int | None = None) -> None:
         super().__init__()
         self.growth_override = growth_override
+        self.cum_override = cum_override
         weekly = state.get("weekly", {})
         self.food = discord.ui.TextInput(label="Food / week", default=str(weekly.get("food", 0)), required=True, max_length=9)
         self.materials = discord.ui.TextInput(label="Materials / week", default=str(weekly.get("materials", 0)), required=True, max_length=9)
@@ -172,6 +193,7 @@ class WeeklyModal(discord.ui.Modal, title="Weekly Changes"):
                 "corruption": int(str(self.corruption)),
                 "birthrate": int(str(self.birthrate)),
                 "growth": int(self.growth_override if self.growth_override is not None else current_weekly.get("growth", 1)),
+                "cum": int(self.cum_override if self.cum_override is not None else current_weekly.get("cum", 7)),
             }
         except ValueError:
             await interaction.response.send_message("All weekly changes must be whole numbers. Negative values are allowed.", ephemeral=True)
@@ -372,15 +394,22 @@ async def setup_interface(interaction: discord.Interaction, channel: discord.Tex
     )
 
 
-@bot.tree.command(name="weekly", description="Edit automatic weekly changes. Growth can be supplied separately.")
-@app_commands.describe(growth="Optional Growth change per week. Default is +1.")
+@bot.tree.command(name="weekly", description="Edit automatic weekly changes. Growth and Cum can be supplied separately.")
+@app_commands.describe(
+    growth="Optional Growth change per week. Default is +1.",
+    cum="Optional Cum generated per week. Default is +7.",
+)
 @app_commands.checks.has_permissions(manage_guild=True)
-async def weekly(interaction: discord.Interaction, growth: int | None = None) -> None:
+async def weekly(
+    interaction: discord.Interaction,
+    growth: int | None = None,
+    cum: int | None = None,
+) -> None:
     if interaction.guild is None:
         await interaction.response.send_message("This command can only be used inside a Discord server.", ephemeral=True)
         return
     state = store.get(interaction.guild.id) or dict(DEFAULT_GAME_STATE)
-    await interaction.response.send_modal(WeeklyModal(state, growth_override=growth))
+    await interaction.response.send_modal(WeeklyModal(state, growth_override=growth, cum_override=cum))
 
 
 RESOURCE_CHOICES = [
@@ -392,6 +421,10 @@ RESOURCE_CHOICES = [
     app_commands.Choice(name="Children", value="children"),
     app_commands.Choice(name="Birthrate", value="birthrate"),
     app_commands.Choice(name="Growth", value="growth"),
+    app_commands.Choice(name="Barrier", value="barrier"),
+    app_commands.Choice(name="Void Pressure", value="void_pressure"),
+    app_commands.Choice(name="Nourishment", value="nourishment"),
+    app_commands.Choice(name="Crime", value="crime"),
 ]
 
 
