@@ -65,17 +65,23 @@ def make_interface_embed(guild: discord.Guild, state: dict) -> discord.Embed:
     birthrate = int(state.get("birthrate", DEFAULT_GAME_STATE["birthrate"]))
     growth = int(state.get("growth", DEFAULT_GAME_STATE["growth"]))
 
+    food_income = int(weekly.get("food", 0))
+    food_consumption = citizens * 10
+    food_net = food_income - food_consumption
+    growth_weekly = int(weekly.get("growth", 1))
+
     embed = discord.Embed(
         title=f"Aethelgard Interface • Week {week}",
         description=(
-            f"**Food:** {food} ({format_change(int(weekly.get('food', 0)))}/week)\n"
+            f"**Food:** {food} ({format_change(food_net)}/week)\n"
+            f"↳ Income: {format_change(food_income)} | Consumption: -{food_consumption}\n"
             f"**Materials:** {materials} ({format_change(int(weekly.get('materials', 0)))}/week)\n"
             f"**Citizens:** {citizens}\n"
             f"**Children:** {children}\n\n"
             f"{SEPARATOR}\n"
             f"### Population Growth\n"
             f"**Birthrate:** {birthrate}/100 ({format_change(int(weekly.get('birthrate', 0)))}/week)\n"
-            f"**Growth:** {growth}/728 ({'+1/week while children exist' if children > 0 else 'inactive'})\n\n"
+            f"**Growth:** {growth}/728 ({format_change(growth_weekly)}/week while children exist)\n\n"
             f"{SEPARATOR}\n"
             f"### Faith\n"
             f"**Current:** {faith}/100\n"
@@ -88,7 +94,7 @@ def make_interface_embed(guild: discord.Guild, state: dict) -> discord.Embed:
             f"{progress_bar(corruption, filled='🟪')}"
         ),
     )
-    embed.set_footer(text=f"Guild: {guild.name} • Food upkeep: 10 per citizen each week")
+    embed.set_footer(text=f"Guild: {guild.name} • Citizens consume 10 Food each per week")
     return embed
 
 
@@ -140,8 +146,9 @@ def make_vote_embed(vote: dict) -> discord.Embed:
 
 
 class WeeklyModal(discord.ui.Modal, title="Weekly Changes"):
-    def __init__(self, state: dict) -> None:
+    def __init__(self, state: dict, growth_override: int | None = None) -> None:
         super().__init__()
+        self.growth_override = growth_override
         weekly = state.get("weekly", {})
         self.food = discord.ui.TextInput(label="Food / week", default=str(weekly.get("food", 0)), required=True, max_length=9)
         self.materials = discord.ui.TextInput(label="Materials / week", default=str(weekly.get("materials", 0)), required=True, max_length=9)
@@ -156,12 +163,15 @@ class WeeklyModal(discord.ui.Modal, title="Weekly Changes"):
             await interaction.response.send_message("You need the **Manage Server** permission to edit weekly changes.", ephemeral=True)
             return
         try:
+            current = store.get(interaction.guild.id) or dict(DEFAULT_GAME_STATE)
+            current_weekly = current.get("weekly", {})
             values = {
                 "food": int(str(self.food)),
                 "materials": int(str(self.materials)),
                 "faith": int(str(self.faith)),
                 "corruption": int(str(self.corruption)),
                 "birthrate": int(str(self.birthrate)),
+                "growth": int(self.growth_override if self.growth_override is not None else current_weekly.get("growth", 1)),
             }
         except ValueError:
             await interaction.response.send_message("All weekly changes must be whole numbers. Negative values are allowed.", ephemeral=True)
@@ -290,19 +300,8 @@ class InterfaceView(discord.ui.View):
             await interaction.response.send_message("You need the **Manage Server** permission to advance the week.", ephemeral=True)
             return
 
-        state, summary = store.advance_week(interaction.guild.id)
+        state, _summary = store.advance_week(interaction.guild.id)
         await interaction.response.edit_message(embed=make_interface_embed(interaction.guild, state), view=self)
-
-        details = [
-            f"Week advanced to **{state['week']}**.",
-            f"Food upkeep: **-{summary['food_upkeep']}**.",
-            f"Weekly Food: **{format_change(summary['food'])}**.",
-        ]
-        if summary["births"]:
-            details.append(f"Births: **+{summary['births']} child{'ren' if summary['births'] != 1 else ''}**.")
-        if summary["matured"]:
-            details.append(f"Matured: **+{summary['matured']} citizen{'s' if summary['matured'] != 1 else ''}**.")
-        await interaction.followup.send("\n".join(details), ephemeral=True)
 
     @discord.ui.button(label="Reset Game", style=discord.ButtonStyle.danger, custom_id="aethelgard:reset_game")
     async def reset_game(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
@@ -373,14 +372,15 @@ async def setup_interface(interaction: discord.Interaction, channel: discord.Tex
     )
 
 
-@bot.tree.command(name="weekly", description="Edit the automatic changes applied whenever the week advances.")
+@bot.tree.command(name="weekly", description="Edit automatic weekly changes. Growth can be supplied separately.")
+@app_commands.describe(growth="Optional Growth change per week. Default is +1.")
 @app_commands.checks.has_permissions(manage_guild=True)
-async def weekly(interaction: discord.Interaction) -> None:
+async def weekly(interaction: discord.Interaction, growth: int | None = None) -> None:
     if interaction.guild is None:
         await interaction.response.send_message("This command can only be used inside a Discord server.", ephemeral=True)
         return
     state = store.get(interaction.guild.id) or dict(DEFAULT_GAME_STATE)
-    await interaction.response.send_modal(WeeklyModal(state))
+    await interaction.response.send_modal(WeeklyModal(state, growth_override=growth))
 
 
 RESOURCE_CHOICES = [
