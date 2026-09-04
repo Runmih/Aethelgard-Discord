@@ -116,6 +116,24 @@ def install(main: Any) -> None:
         return result
 
     main.store._normalize = normalize_without_corruption
+
+    # InterfaceStore._update saves the mutated entry before normalizing its return
+    # value. Strip legacy Corruption there too so it cannot reappear in state.json.
+    def update_without_corruption(guild_id: int, mutator: Any) -> dict[str, Any]:
+        data = main.store._load_all()
+        key = str(guild_id)
+        entry = main.store._normalize(data.get(key))
+        mutator(entry)
+        entry.pop("corruption", None)
+        weekly = dict(entry.get("weekly", {}))
+        weekly.pop("corruption", None)
+        entry["weekly"] = weekly
+        data[key] = entry
+        main.store._save_all(data)
+        return main.store._normalize(entry)
+
+    main.store._update = update_without_corruption
+
     main.DEFAULT_GAME_STATE.pop("corruption", None)
     if isinstance(main.DEFAULT_GAME_STATE.get("weekly"), dict):
         main.DEFAULT_GAME_STATE["weekly"].pop("corruption", None)
