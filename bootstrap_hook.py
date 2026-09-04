@@ -45,6 +45,6 @@ def install_bootstrap() -> None:
             install_v1_adjustments(main)
             install_v1_1_adjustments(main)
             install_corruption_removal(main)
-        return _ORIGINAL_RUN(self, *args: Any, **kwargs: Any)
+        return _ORIGINAL_RUN(self, *args, **kwargs)
 
     commands.Bot.run = run_with_aethelgard_systems
