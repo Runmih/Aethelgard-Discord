@@ -196,6 +196,148 @@
       }
     ]
   },
+  "healthcare": {
+    "starting_capacity": 0,
+    "worsening_percent": 5,
+    "health_crisis_death_percent": 10,
+    "tiers": [
+      {
+        "id": "healthy",
+        "label": "Healthy",
+        "emoji": "🟢",
+        "min": 0,
+        "max": 20,
+        "workforce_multiplier": 1.0,
+        "expedition_risk_percent": 0
+      },
+      {
+        "id": "strained",
+        "label": "Strained",
+        "emoji": "🟡",
+        "min": 21,
+        "max": 40,
+        "workforce_multiplier": 0.9,
+        "expedition_risk_percent": 0,
+        "worsening_dc": 8
+      },
+      {
+        "id": "sick",
+        "label": "Sick",
+        "emoji": "🟠",
+        "min": 41,
+        "max": 60,
+        "workforce_multiplier": 0.8,
+        "expedition_risk_percent": 0,
+        "worsening_dc": 12
+      },
+      {
+        "id": "severe",
+        "label": "Severe",
+        "emoji": "🔴",
+        "min": 61,
+        "max": 80,
+        "workforce_multiplier": 0.7,
+        "expedition_risk_percent": 10,
+        "worsening_dc": 16,
+        "health_crisis_dc": 12
+      },
+      {
+        "id": "critical",
+        "label": "Critical",
+        "emoji": "🚨",
+        "min": 81,
+        "max": 99,
+        "workforce_multiplier": 0.5,
+        "expedition_risk_percent": 20,
+        "block_risky_expeditions": true,
+        "worsening_dc": 18,
+        "health_crisis_dc": 16
+      },
+      {
+        "id": "collapse",
+        "label": "Healthcare Collapse",
+        "emoji": "☠️",
+        "min": 100,
+        "max": 100,
+        "workforce_multiplier": 0.0,
+        "expedition_risk_percent": 20,
+        "block_risky_expeditions": true,
+        "block_new_expeditions": true,
+        "research_stops": true,
+        "ritual_prepaid_only": true,
+        "health_crisis_dc": 18
+      }
+    ]
+  },
+  "expeditions": {
+    "material_per_expedition": 100,
+    "default_warriors_per_expedition": 3,
+    "default_risk_mode": "default"
+  },
+  "outposts": {
+    "default_unlocked": false,
+    "default_warriors_per_outpost": 5,
+    "default_risk_mode": "default",
+    "materials_per_outpost": 150
+  },
+  "void_exposure_system": {
+    "tiers": [
+      {
+        "id": "clear",
+        "label": "Clear",
+        "emoji": "⚪",
+        "min": 0,
+        "max": 19.999,
+        "battle_bonus": 0,
+        "crime_per_week": 0
+      },
+      {
+        "id": "empowered",
+        "label": "Empowered",
+        "emoji": "🟣",
+        "min": 20,
+        "max": 39.999,
+        "battle_bonus": 2,
+        "crime_per_week": 0
+      },
+      {
+        "id": "unstable",
+        "label": "Unstable",
+        "emoji": "🟪",
+        "min": 40,
+        "max": 59.999,
+        "battle_bonus": 2,
+        "crime_per_week": 5
+      },
+      {
+        "id": "corrupted",
+        "label": "Corrupted",
+        "emoji": "☣️",
+        "min": 60,
+        "max": 79.999,
+        "battle_bonus": 2,
+        "crime_per_week": 15
+      },
+      {
+        "id": "lethal",
+        "label": "Lethal Corruption",
+        "emoji": "☠️",
+        "min": 80,
+        "max": 99.999,
+        "battle_bonus": 2,
+        "crime_per_week": 15
+      },
+      {
+        "id": "voidling",
+        "label": "Voidling Emergence",
+        "emoji": "👁️",
+        "min": 100,
+        "max": 100,
+        "battle_bonus": 2,
+        "crime_per_week": 15
+      }
+    ]
+  },
   "void_progression": {
     "pressure_check_interval": 5,
     "natural_20_change": -5,
