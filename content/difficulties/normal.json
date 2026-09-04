@@ -1,7 +1,7 @@
 {
   "id": "normal",
   "name": "Normal",
-  "description": "Predictable, mostly stable Void pressure with occasional surges that permanently worsen the baseline a little.",
+  "description": "Stable, predictable Void pressure with occasional surges that permanently worsen the baseline.",
   "starting_state": {
     "week": 1,
     "food": 2000,
