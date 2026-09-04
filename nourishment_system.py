@@ -5,6 +5,7 @@ import random
 from typing import Any
 
 from difficulty_store import load_difficulty
+from productivity_system import get_effective_weekly_food
 
 
 def _rules_for(state: dict[str, Any]) -> dict[str, Any]:
@@ -31,6 +32,7 @@ def get_nourishment_tier(state: dict[str, Any]) -> dict[str, Any]:
         "emoji": "🟨",
         "min": 0,
         "max": 100,
+        "workforce_multiplier": 1.0,
         "crime": 0,
         "faith": 0,
         "corruption": 0,
@@ -48,12 +50,24 @@ def apply_food_nourishment_week(
     rules = _rules_for(state)
     food_per_citizen = max(0, int(rules.get("food_per_citizen", 10)))
     citizens_at_start = max(0, int(before_state.get("citizens", 0)))
-    weekly_food = int(before_state.get("weekly", {}).get("food", 0))
     food_before = max(0, int(before_state.get("food", 0)))
 
+    food_income = get_effective_weekly_food(before_state)
+    base_weekly_food = int(food_income["base"])
+    effective_weekly_food = int(food_income["effective"])
+    workforce_multiplier = float(food_income["multiplier"])
+
     food_required = citizens_at_start * food_per_citizen
-    food_available = max(0, food_before + weekly_food)
+    food_available = max(0, food_before + effective_weekly_food)
     food_used = min(food_required, food_available)
+    target_food_after = max(0, food_available - food_required)
+
+    # config_store applies the unmodified weekly Food value first. Correct the
+    # resulting stockpile here so the effective income is Base × Workforce Multiplier.
+    current_food_after = max(0, int(state.get("food", 0)))
+    food_correction = target_food_after - current_food_after
+    if food_correction:
+        state, _ = store.add_resource(guild_id, "food", food_correction)
 
     if food_required <= 0:
         fed_percent = 100.0
@@ -129,6 +143,10 @@ def apply_food_nourishment_week(
         "food_required": food_required,
         "food_available": food_available,
         "food_used": food_used,
+        "food_base_income": base_weekly_food,
+        "food_effective_income": effective_weekly_food,
+        "workforce_multiplier": workforce_multiplier,
+        "workforce_multiplier_breakdown": list(food_income.get("breakdown", [])),
         "fed_percent": fed_percent,
         "unfed_percent": unfed_percent,
         "nourishment_change": nourishment_change,
