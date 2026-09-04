@@ -83,6 +83,7 @@
       "first_window": [45, 55],
       "interval_weeks": 50,
       "jitter_weeks": 10,
+      "duration_weeks": 5,
       "multiplier_start": 1.2,
       "multiplier_step": 0.1,
       "multiplier_max": 1.6,
