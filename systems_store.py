@@ -13,6 +13,7 @@ RISK_MODES = {
     "risky": {"label": "Risky", "dc": 16, "multiplier": 1.5},
 }
 
+
 class ExtendedSystemsStore:
     def __init__(self, path: str | Path = "systems_state.json") -> None:
         self.path = Path(path)
@@ -44,8 +45,7 @@ class ExtendedSystemsStore:
             "patients": 0,
             "healthcare_capacity": max(0, int(healthcare_rules.get("starting_capacity", 0))),
             "expeditions": {
-                "planned": 0,
-                "warriors_per_expedition": max(
+                "warriors": max(
                     1, int(expedition_rules.get("default_warriors_per_expedition", 3))
                 ),
                 "risk_mode": str(expedition_rules.get("default_risk_mode", "default")),
@@ -76,6 +76,22 @@ class ExtendedSystemsStore:
         if expedition_mode not in RISK_MODES:
             expedition_mode = "default"
 
+        # Migration: older saves called this warriors_per_expedition and also
+        # stored a planned expedition count. Expeditions are now one recurring
+        # weekly action, so only the Warrior count and risk setting remain.
+        expedition_warriors = max(
+            1,
+            int(
+                expeditions_source.get(
+                    "warriors",
+                    expeditions_source.get(
+                        "warriors_per_expedition",
+                        expedition_default["warriors"],
+                    ),
+                )
+            ),
+        )
+
         outposts_source = source.get("outposts", {})
         if not isinstance(outposts_source, dict):
             outposts_source = {}
@@ -92,16 +108,7 @@ class ExtendedSystemsStore:
                 0, int(source.get("healthcare_capacity", default["healthcare_capacity"]))
             ),
             "expeditions": {
-                "planned": max(0, int(expeditions_source.get("planned", 0))),
-                "warriors_per_expedition": max(
-                    1,
-                    int(
-                        expeditions_source.get(
-                            "warriors_per_expedition",
-                            expedition_default["warriors_per_expedition"],
-                        )
-                    ),
-                ),
+                "warriors": expedition_warriors,
                 "risk_mode": expedition_mode,
             },
             "outposts": {
@@ -160,8 +167,7 @@ class ExtendedSystemsStore:
         guild_id: int,
         difficulty_id: str,
         *,
-        planned: int,
-        warriors_per_expedition: int,
+        warriors: int,
         risk_mode: str,
     ) -> dict[str, Any]:
         entry = self.get(guild_id, difficulty_id)
@@ -169,8 +175,7 @@ class ExtendedSystemsStore:
         if mode not in RISK_MODES:
             raise ValueError("Unknown expedition risk mode")
         entry["expeditions"] = {
-            "planned": max(0, int(planned)),
-            "warriors_per_expedition": max(1, int(warriors_per_expedition)),
+            "warriors": max(1, int(warriors)),
             "risk_mode": mode,
         }
         return self.save(guild_id, entry)
