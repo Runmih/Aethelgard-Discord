@@ -15,6 +15,10 @@ import weekly_systems
 _INSTALLED = False
 
 
+def _format_modifier(value: int) -> str:
+    return f"+{value}" if value >= 0 else str(value)
+
+
 def _availability(state: dict[str, Any], ext: dict[str, Any]) -> tuple[int, int, int, int]:
     total_warriors = max(0, int(state.get("workforce", {}).get("warriors", 0)))
     outposts = ext.get("outposts", {})
@@ -34,6 +38,7 @@ def _resolve_expeditions(
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     expedition = ext["expeditions"]
     warriors = max(1, int(expedition.get("warriors", 3)))
+    roll_modifier = int(expedition.get("roll_modifier", 0))
     mode_id = str(expedition.get("risk_mode", "default"))
     risk = weekly_systems._risk_details(state, mode_id)
     health_tier = get_healthcare_tier(state)
@@ -57,12 +62,14 @@ def _resolve_expeditions(
     if material_gain:
         state, _ = main_store.add_resource(guild_id, "materials", material_gain)
 
-    roll = None
+    raw_roll = None
+    total_roll = None
     failed = False
     exposure_gained = 0.0
     if ran:
-        roll = random.randint(1, 20)
-        failed = roll < int(risk["final_dc"])
+        raw_roll = random.randint(1, 20)
+        total_roll = raw_roll + roll_modifier
+        failed = total_roll < int(risk["final_dc"])
         if failed:
             exposure_gained = weekly_systems._add_exposure(ext, warriors, total_warriors)
 
@@ -72,8 +79,11 @@ def _resolve_expeditions(
         "available_warriors": available,
         "stationed_warriors": stationed,
         "risk": risk,
-        "roll": roll,
-        "rolls": [roll] if roll is not None else [],
+        "raw_roll": raw_roll,
+        "roll_modifier": roll_modifier,
+        "total_roll": total_roll,
+        "roll": total_roll,
+        "rolls": [total_roll] if total_roll is not None else [],
         "failures": 1 if failed else 0,
         "material_gain": material_gain,
         "exposure_gained": exposure_gained,
@@ -91,6 +101,7 @@ def make_expedition_embed(main: Any, guild: discord.Guild, state: dict[str, Any]
 
     total_warriors, active_outposts, stationed, available = _availability(enriched, ext)
     warriors = max(1, int(expedition.get("warriors", 3)))
+    roll_modifier = int(expedition.get("roll_modifier", 0))
     risk = weekly_systems._risk_details(enriched, str(expedition.get("risk_mode", "default")))
     material_base = int(weekly_systems._expedition_rules(enriched).get("material_per_expedition", 100))
     material_each = int(round(material_base * float(risk["multiplier"])))
@@ -107,8 +118,8 @@ def make_expedition_embed(main: Any, guild: discord.Guild, state: dict[str, Any]
     expedition_lines = [
         "### ⚔️ Expeditions",
         f"**Warriors:** {warriors} • Available: {available}/{total_warriors}",
-        f"**Risk Setting:** {risk['label']}",
-        f"**Total Void Risk:** DC **{risk['final_dc']}**",
+        f"**Risk:** {risk['label']} • Total Void Risk DC **{risk['final_dc']}**",
+        f"**Roll:** 1d20 {_format_modifier(roll_modifier)}",
         f"**Materials:** +{material_each}/week when deployed",
         status,
     ]
@@ -119,11 +130,26 @@ def make_expedition_embed(main: Any, guild: discord.Guild, state: dict[str, Any]
         if ran:
             last_risk = last_expedition.get("risk", {})
             last_dc = int(last_risk.get("final_dc", risk["final_dc"])) if isinstance(last_risk, dict) else int(risk["final_dc"])
-            roll = last_expedition.get("roll")
-            if roll is None:
+            last_modifier = int(last_expedition.get("roll_modifier", 0))
+            raw_roll = last_expedition.get("raw_roll")
+            total_roll = last_expedition.get("total_roll", last_expedition.get("roll"))
+
+            if raw_roll is None and total_roll is not None:
+                raw_roll = int(total_roll) - last_modifier
+            if total_roll is None:
                 rolls = list(last_expedition.get("rolls", []))
-                roll = rolls[0] if rolls else None
-            roll_text = "None" if roll is None else f"{int(roll)}{'✅' if int(roll) >= last_dc else '❌'}"
+                total_roll = rolls[0] if rolls else None
+
+            if total_roll is None:
+                roll_text = "None"
+            else:
+                total_roll = int(total_roll)
+                raw_roll = int(raw_roll) if raw_roll is not None else total_roll
+                result_icon = "✅" if total_roll >= last_dc else "❌"
+                roll_text = (
+                    f"{raw_roll} {_format_modifier(last_modifier)} = **{total_roll}** {result_icon}"
+                )
+
             expedition_lines.extend(
                 [
                     "",
@@ -196,11 +222,12 @@ def install(main: Any) -> None:
 
     @main.bot.tree.command(
         name="expedition_setup",
-        description="Set the recurring weekly expedition risk and Warrior count.",
+        description="Set recurring expedition risk, Warriors, and roll modifier.",
     )
     @app_commands.describe(
         risk_mode="Void risk and material reward setting",
         warriors="Warriors assigned to the expedition each week",
+        roll_modifier="Bonus or penalty added to the expedition's 1d20 roll",
     )
     @app_commands.choices(risk_mode=risk_choices)
     @app_commands.checks.has_permissions(manage_guild=True)
@@ -208,6 +235,7 @@ def install(main: Any) -> None:
         interaction: discord.Interaction,
         risk_mode: app_commands.Choice[str],
         warriors: app_commands.Range[int, 1, 100] = 3,
+        roll_modifier: int = 0,
     ) -> None:
         if interaction.guild is None:
             return
@@ -219,6 +247,7 @@ def install(main: Any) -> None:
             difficulty_id,
             warriors=int(warriors),
             risk_mode=risk_mode.value,
+            roll_modifier=int(roll_modifier),
         )
 
         enriched = systems_store.enrich(interaction.guild.id, state)
@@ -232,7 +261,8 @@ def install(main: Any) -> None:
         )
 
         await interaction.response.send_message(
-            f"Recurring expedition updated: **{risk_mode.name}**, **{int(warriors)} Warriors**.\n"
+            f"Recurring expedition updated: **{risk_mode.name}**, **{int(warriors)} Warriors**, "
+            f"roll **1d20 {_format_modifier(int(roll_modifier))}**.\n"
             f"{availability_text}",
             ephemeral=True,
         )
