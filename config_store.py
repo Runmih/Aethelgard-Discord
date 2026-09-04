@@ -20,6 +20,7 @@ DEFAULT_GAME_STATE.update(
         "next_void_surge_week": None,
         "void_surge_count": 0,
         "void_base_shift": 0,
+        "active_void_surge": None,
         "weekly": dict(DEFAULT_WEEKLY_CHANGES),
         "votes": {},
     }
@@ -57,10 +58,7 @@ def _normalize_workforce_policy(source: Any, fallback: Any) -> dict[str, Any]:
         for role in WORKFORCE_ROLES
     }
     if sum(ratio.values()) != 100:
-        ratio = {
-            role: max(0, int(fallback_ratio.get(role, 25)))
-            for role in WORKFORCE_ROLES
-        }
+        ratio = {role: max(0, int(fallback_ratio.get(role, 25))) for role in WORKFORCE_ROLES}
     if sum(ratio.values()) != 100:
         ratio = {role: 25 for role in WORKFORCE_ROLES}
 
@@ -91,17 +89,13 @@ def _select_workforce_role(entry: dict[str, Any]) -> str:
             if role in shortages:
                 return role
 
-    surplus = {
-        role: max(0, workforce[role] - minimum[role])
-        for role in WORKFORCE_ROLES
-    }
+    surplus = {role: max(0, workforce[role] - minimum[role]) for role in WORKFORCE_ROLES}
     future_total = sum(surplus.values()) + 1
     priority_index = {role: index for index, role in enumerate(priority)}
 
     def score(role: str) -> tuple[float, int]:
         target = future_total * ratio[role] / 100
-        deficit = target - surplus[role]
-        return deficit, -priority_index.get(role, len(WORKFORCE_ROLES))
+        return target - surplus[role], -priority_index.get(role, len(WORKFORCE_ROLES))
 
     return max(WORKFORCE_ROLES, key=score)
 
@@ -168,6 +162,31 @@ def next_surge_week(current_week: int, difficulty: dict[str, Any]) -> int | None
     return max(current_week + 1, current_week + interval + random.randint(-jitter, jitter))
 
 
+def _normalize_active_surge(source: Any) -> dict[str, Any] | None:
+    if not isinstance(source, dict):
+        return None
+    try:
+        active = {
+            "number": max(1, int(source.get("number", 1))),
+            "start_week": max(1, int(source.get("start_week", 1))),
+            "end_week": max(1, int(source.get("end_week", 1))),
+            "duration_weeks": max(1, int(source.get("duration_weeks", 1))),
+            "multiplier": max(1.0, float(source.get("multiplier", 1.0))),
+            "title": str(source.get("title", "🌑 MAJOR VOID SURGE")),
+            "text": str(source.get("text", "The Void surges against Aethelgard.")),
+        }
+    except (TypeError, ValueError):
+        return None
+
+    for key in ("channel_id", "message_id"):
+        if source.get(key) is not None:
+            try:
+                active[key] = int(source[key])
+            except (TypeError, ValueError):
+                pass
+    return active
+
+
 class InterfaceStore:
     def __init__(self, path: str | Path = "state.json") -> None:
         self.path = Path(path)
@@ -198,24 +217,14 @@ class InterfaceStore:
         source_weekly = source.get("weekly", {})
         if not isinstance(source_weekly, dict):
             source_weekly = {}
-
-        weekly = {
-            key: int(source_weekly.get(key, default))
-            for key, default in weekly_defaults.items()
-        }
+        weekly = {key: int(source_weekly.get(key, default)) for key, default in weekly_defaults.items()}
 
         citizens = max(0, int(source.get("citizens", starting.get("citizens", 0))))
-        workforce_policy = _normalize_workforce_policy(
-            source.get("workforce_policy"),
-            starting.get("workforce_policy"),
-        )
+        workforce_policy = _normalize_workforce_policy(source.get("workforce_policy"), starting.get("workforce_policy"))
 
         source_workforce = source.get("workforce")
         if isinstance(source_workforce, dict):
-            workforce = {
-                role: max(0, int(source_workforce.get(role, 0)))
-                for role in WORKFORCE_ROLES
-            }
+            workforce = {role: max(0, int(source_workforce.get(role, 0))) for role in WORKFORCE_ROLES}
         else:
             workforce = _even_workforce(citizens)
 
@@ -240,6 +249,7 @@ class InterfaceStore:
             "next_void_surge_week": source.get("next_void_surge_week"),
             "void_surge_count": max(0, int(source.get("void_surge_count", 0))),
             "void_base_shift": max(0, int(source.get("void_base_shift", 0))),
+            "active_void_surge": _normalize_active_surge(source.get("active_void_surge")),
             "weekly": weekly,
             "votes": source.get("votes", {}) if isinstance(source.get("votes", {}), dict) else {},
         }
@@ -287,7 +297,6 @@ class InterfaceStore:
             for key, value in changes.items():
                 weekly[key] = int(value)
             entry["weekly"] = weekly
-
         return self._update(guild_id, mutate)
 
     def set_workforce_policy(
@@ -316,6 +325,16 @@ class InterfaceStore:
         }
         return self._update(guild_id, lambda entry: entry.update({"workforce_policy": policy}))
 
+    def set_void_surge_message(self, guild_id: int, channel_id: int, message_id: int) -> dict[str, Any]:
+        def mutate(entry: dict[str, Any]) -> None:
+            active = entry.get("active_void_surge")
+            if isinstance(active, dict):
+                active = dict(active)
+                active["channel_id"] = int(channel_id)
+                active["message_id"] = int(message_id)
+                entry["active_void_surge"] = active
+        return self._update(guild_id, mutate)
+
     @staticmethod
     def _apply_birthrate(entry: dict[str, Any], change: int) -> int:
         total = max(0, int(entry.get("birthrate", 0)) + change)
@@ -336,12 +355,10 @@ class InterfaceStore:
         possible, remainder = divmod(total, 728)
         matured = min(children, possible)
         entry["children"] = children - matured
-
         for _ in range(matured):
             entry["citizens"] = max(0, int(entry.get("citizens", 0))) + 1
             role = _assign_worker(entry)
             assigned[role] += 1
-
         entry["growth"] = remainder if entry["children"] > 0 else 0
         return matured, assigned
 
@@ -397,6 +414,7 @@ class InterfaceStore:
             "barrier_damage": 0,
             "void_roll": None,
             "void_surge": None,
+            "expired_void_surge": None,
         }
 
         def mutate(entry: dict[str, Any]) -> None:
@@ -405,10 +423,15 @@ class InterfaceStore:
             entry["week"] = max(1, int(entry.get("week", 1))) + 1
             week = int(entry["week"])
 
+            active = entry.get("active_void_surge")
+            if isinstance(active, dict) and week > int(active.get("end_week", 0)):
+                summary["expired_void_surge"] = dict(active)
+                entry["active_void_surge"] = None
+                active = None
+
             food_net = int(weekly.get("food", 0)) - (max(0, int(entry.get("citizens", 0))) * 10)
             entry["food"] = max(0, int(entry.get("food", 0)) + food_net)
             entry["materials"] = max(0, int(entry.get("materials", 0)) + int(weekly.get("materials", 0)))
-
             entry["faith"] = clamp(int(entry.get("faith", 0)) + int(weekly.get("faith", 0)), 0, 100)
             entry["corruption"] = clamp(int(entry.get("corruption", 0)) + int(weekly.get("corruption", 0)), 0, 100)
             entry["nourishment"] = clamp(int(entry.get("nourishment", 0)) + int(weekly.get("nourishment", 0)), 0, 100)
@@ -417,9 +440,7 @@ class InterfaceStore:
             pressure_at_start = clamp(int(entry.get("void_pressure", 0)), 0, 9999)
             summary["barrier_damage"] = pressure_at_start
             entry["barrier"] = clamp(
-                int(entry.get("barrier", 0))
-                + int(weekly.get("barrier", 0))
-                - pressure_at_start,
+                int(entry.get("barrier", 0)) + int(weekly.get("barrier", 0)) - pressure_at_start,
                 0,
                 100,
             )
@@ -436,14 +457,12 @@ class InterfaceStore:
             base_shift = max(0, int(entry.get("void_base_shift", 0)))
             band_min = clamp(int(era.get("pressure_min", 0)) + base_shift, 0, 9999)
             band_max = clamp(int(era.get("pressure_max", 9999)) + base_shift, band_min, 9999)
-
             pressure = clamp(pressure_at_start, band_min, band_max)
 
             interval = max(0, int(progression.get("pressure_check_interval", 0)))
             if interval and week % interval == 0:
                 roll = random.randint(1, 20)
                 dc = int(era.get("dc", 12))
-
                 if roll == 20:
                     change = int(progression.get("natural_20_change", -5))
                     outcome = "natural_20"
@@ -456,7 +475,6 @@ class InterfaceStore:
                 else:
                     change = int(progression.get("fail_change", 3))
                     outcome = "fail"
-
                 pressure = clamp(pressure + change, band_min, band_max)
                 summary["void_roll"] = {
                     "roll": roll,
@@ -468,38 +486,49 @@ class InterfaceStore:
                 }
 
             pressure = clamp(pressure + int(weekly.get("void_pressure", 0)), 0, 9999)
-
             surge_rules = progression.get("major_surges", {})
-            scheduled = entry.get("next_void_surge_week")
-            if scheduled is None:
-                entry["next_void_surge_week"] = next_surge_week(week, difficulty)
-            elif week >= int(scheduled):
-                count = max(0, int(entry.get("void_surge_count", 0)))
-                start = float(surge_rules.get("multiplier_start", 1.2))
-                step = float(surge_rules.get("multiplier_step", 0.1))
-                maximum = float(surge_rules.get("multiplier_max", 1.6))
-                multiplier = min(maximum, start + (count * step))
 
-                before = pressure
-                pressure = clamp(math.ceil(pressure * multiplier), 0, 9999)
+            if isinstance(active, dict):
+                pressure = clamp(math.ceil(pressure * float(active.get("multiplier", 1.0))), 0, 9999)
+            else:
+                scheduled = entry.get("next_void_surge_week")
+                if scheduled is None:
+                    entry["next_void_surge_week"] = next_surge_week(week, difficulty)
+                elif week >= int(scheduled):
+                    count = max(0, int(entry.get("void_surge_count", 0)))
+                    start_multiplier = float(surge_rules.get("multiplier_start", 1.2))
+                    step = float(surge_rules.get("multiplier_step", 0.1))
+                    maximum = float(surge_rules.get("multiplier_max", 1.6))
+                    multiplier = min(maximum, start_multiplier + (count * step))
+                    duration = max(1, int(surge_rules.get("duration_weeks", 5)))
+                    end_week = week + duration - 1
 
-                shift = max(0, int(surge_rules.get("base_shift_per_surge", 5)))
-                entry["void_base_shift"] = base_shift + shift
+                    before = pressure
+                    pressure = clamp(math.ceil(pressure * multiplier), 0, 9999)
 
-                announcements = surge_rules.get("announcements", [])
-                announcement = random.choice(announcements) if isinstance(announcements, list) and announcements else {}
-                summary["void_surge"] = {
-                    "number": count + 1,
-                    "multiplier": multiplier,
-                    "before": before,
-                    "after": pressure,
-                    "base_shift": shift,
-                    "title": str(announcement.get("title", "🌑 MAJOR VOID SURGE")),
-                    "text": str(announcement.get("text", "The Void surges against Aethelgard.")),
-                }
+                    shift = max(0, int(surge_rules.get("base_shift_per_surge", 5)))
+                    entry["void_base_shift"] = base_shift + shift
 
-                entry["void_surge_count"] = count + 1
-                entry["next_void_surge_week"] = next_surge_week(week, difficulty)
+                    announcements = surge_rules.get("announcements", [])
+                    announcement = random.choice(announcements) if isinstance(announcements, list) and announcements else {}
+                    active = {
+                        "number": count + 1,
+                        "start_week": week,
+                        "end_week": end_week,
+                        "duration_weeks": duration,
+                        "multiplier": multiplier,
+                        "title": str(announcement.get("title", "🌑 MAJOR VOID SURGE")),
+                        "text": str(announcement.get("text", "The Void surges against Aethelgard.")),
+                    }
+                    entry["active_void_surge"] = active
+                    summary["void_surge"] = {
+                        **active,
+                        "before": before,
+                        "after": pressure,
+                        "base_shift": shift,
+                    }
+                    entry["void_surge_count"] = count + 1
+                    entry["next_void_surge_week"] = next_surge_week(week, difficulty)
 
             entry["void_pressure"] = pressure
 
@@ -513,7 +542,6 @@ class InterfaceStore:
         data = self._load_all()
         key = str(guild_id)
         old_entry = self._normalize(data.get(key))
-
         entry: dict[str, Any] = dict(starting)
         entry.update(
             {
@@ -522,6 +550,7 @@ class InterfaceStore:
                 "next_void_surge_week": initial_surge_week(difficulty),
                 "void_surge_count": 0,
                 "void_base_shift": 0,
+                "active_void_surge": None,
                 "votes": old_entry.get("votes", {}),
             }
         )
