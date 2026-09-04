@@ -9,7 +9,6 @@
     "citizens": 20,
     "children": 0,
     "faith": 50,
-    "corruption": 20,
     "birthrate": 0,
     "growth": 0,
     "barrier": 100,
@@ -54,8 +53,7 @@
     "crime": 0,
     "faith": 0,
     "barrier": 0,
-    "void_pressure": 0,
-    "corruption": 0
+    "void_pressure": 0
   },
   "food_nourishment": {
     "food_per_citizen": 10,
@@ -74,9 +72,9 @@
         "workforce_multiplier": 0.85,
         "crime": 10,
         "faith": -10,
-        "corruption": 3,
         "birthrate": 0,
-        "growth": 0
+        "growth": 0,
+        "void_exposure_reduction_percent": 0
       },
       {
         "id": "undernourished",
@@ -87,9 +85,9 @@
         "workforce_multiplier": 0.95,
         "crime": 5,
         "faith": -5,
-        "corruption": 1,
         "birthrate": 0,
-        "growth": 0
+        "growth": 0,
+        "void_exposure_reduction_percent": 0
       },
       {
         "id": "stable",
@@ -100,9 +98,9 @@
         "workforce_multiplier": 1.0,
         "crime": 0,
         "faith": 0,
-        "corruption": 0,
         "birthrate": 0,
-        "growth": 0
+        "growth": 0,
+        "void_exposure_reduction_percent": 0
       },
       {
         "id": "well_fed",
@@ -113,9 +111,9 @@
         "workforce_multiplier": 1.05,
         "crime": 0,
         "faith": 5,
-        "corruption": -1,
         "birthrate": 0,
-        "growth": 0
+        "growth": 0,
+        "void_exposure_reduction_percent": 5
       },
       {
         "id": "abundant",
@@ -126,9 +124,9 @@
         "workforce_multiplier": 1.1,
         "crime": 0,
         "faith": 10,
-        "corruption": -2,
         "birthrate": 5,
-        "growth": 5
+        "growth": 5,
+        "void_exposure_reduction_percent": 10
       }
     ]
   },
