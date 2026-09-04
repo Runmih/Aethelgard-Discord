@@ -340,7 +340,7 @@ def _resolve_healthcare(
     tier_after_worsening = get_healthcare_tier(enriched)
 
     crisis = None
-    crisis_dc = tier_after_worsening.get("health_crisis_dc")
+    crisis_dc = tier_before_rolls.get("health_crisis_dc")
     crisis_deaths = 0
     if crisis_dc is not None and int(ext.get("patients", 0)) > 0:
         roll = random.randint(1, 20)
