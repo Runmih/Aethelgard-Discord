@@ -71,6 +71,7 @@
         "emoji": "🟥",
         "min": 0,
         "max": 20,
+        "workforce_multiplier": 0.85,
         "crime": 10,
         "faith": -10,
         "corruption": 3,
@@ -83,6 +84,7 @@
         "emoji": "🟧",
         "min": 21,
         "max": 40,
+        "workforce_multiplier": 0.95,
         "crime": 5,
         "faith": -5,
         "corruption": 1,
@@ -95,6 +97,7 @@
         "emoji": "🟨",
         "min": 41,
         "max": 60,
+        "workforce_multiplier": 1.0,
         "crime": 0,
         "faith": 0,
         "corruption": 0,
@@ -107,6 +110,7 @@
         "emoji": "🟩",
         "min": 61,
         "max": 80,
+        "workforce_multiplier": 1.05,
         "crime": 0,
         "faith": 5,
         "corruption": -1,
@@ -119,11 +123,76 @@
         "emoji": "🟦",
         "min": 81,
         "max": 100,
+        "workforce_multiplier": 1.1,
         "crime": 0,
         "faith": 10,
         "corruption": -2,
         "birthrate": 5,
         "growth": 5
+      }
+    ]
+  },
+  "faith_system": {
+    "tiers": [
+      {
+        "id": "despair",
+        "label": "Despair",
+        "emoji": "🌑",
+        "min": 0,
+        "max": 20,
+        "workforce_multiplier": 0.8,
+        "void_exposure_risk": 1,
+        "ritual_power": 1.0,
+        "miracle_available": false,
+        "description": "Hope is failing. Work slows, warriors lose conviction, and expeditions are more vulnerable to the Void."
+      },
+      {
+        "id": "steady",
+        "label": "Steady",
+        "emoji": "⚪",
+        "min": 21,
+        "max": 50,
+        "workforce_multiplier": 1.0,
+        "void_exposure_risk": 0,
+        "ritual_power": 1.0,
+        "miracle_available": false,
+        "description": "Faith is present but calm. The city receives no major bonus or penalty."
+      },
+      {
+        "id": "devout",
+        "label": "Devout",
+        "emoji": "🙏",
+        "min": 51,
+        "max": 75,
+        "workforce_multiplier": 1.2,
+        "void_exposure_risk": -1,
+        "ritual_power": 1.0,
+        "miracle_available": false,
+        "description": "Shared belief strengthens discipline and makes the population more resistant to the Void."
+      },
+      {
+        "id": "inspired",
+        "label": "Inspired",
+        "emoji": "✨",
+        "min": 76,
+        "max": 99,
+        "workforce_multiplier": 1.4,
+        "void_exposure_risk": -1,
+        "ritual_power": 1.2,
+        "miracle_available": false,
+        "description": "Aethelgard acts with unusual unity. Productivity surges and rituals carry greater force."
+      },
+      {
+        "id": "miracle",
+        "label": "Miracle Ready",
+        "emoji": "☀️",
+        "min": 100,
+        "max": 100,
+        "workforce_multiplier": 1.4,
+        "void_exposure_risk": -1,
+        "ritual_power": 1.2,
+        "miracle_available": true,
+        "description": "Faith has reached its peak. A Miracle may be invoked and resolved manually."
       }
     ]
   },
