@@ -32,6 +32,7 @@ def install_bootstrap() -> None:
             from interface_cleanup import install as install_interface_cleanup
             from command_consolidation import install as install_command_consolidation
             from button_text_cleanup import install as install_button_text_cleanup
+            from v1_adjustments import install as install_v1_adjustments
 
             install(main)
             install_expedition_system(main)
@@ -39,6 +40,7 @@ def install_bootstrap() -> None:
             install_interface_cleanup(main)
             install_command_consolidation(main)
             install_button_text_cleanup(main)
+            install_v1_adjustments(main)
         return _ORIGINAL_RUN(self, *args, **kwargs)
 
     commands.Bot.run = run_with_aethelgard_systems
