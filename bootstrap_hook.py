@@ -39,6 +39,6 @@ def install_bootstrap() -> None:
             install_interface_cleanup(main)
             install_command_consolidation(main)
             install_button_text_cleanup(main)
-        return _ORIGINAL_RUN(self, *args: Any, **kwargs: Any)
+        return _ORIGINAL_RUN(self, *args, **kwargs)
 
     commands.Bot.run = run_with_aethelgard_systems
