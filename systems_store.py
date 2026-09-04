@@ -49,6 +49,7 @@ class ExtendedSystemsStore:
                     1, int(expedition_rules.get("default_warriors_per_expedition", 3))
                 ),
                 "risk_mode": str(expedition_rules.get("default_risk_mode", "default")),
+                "roll_modifier": int(expedition_rules.get("default_roll_modifier", 0)),
             },
             "outposts": {
                 "unlocked": bool(outpost_rules.get("default_unlocked", False)),
@@ -91,6 +92,12 @@ class ExtendedSystemsStore:
                 )
             ),
         )
+        expedition_roll_modifier = int(
+            expeditions_source.get(
+                "roll_modifier",
+                expedition_default.get("roll_modifier", 0),
+            )
+        )
 
         outposts_source = source.get("outposts", {})
         if not isinstance(outposts_source, dict):
@@ -110,6 +117,7 @@ class ExtendedSystemsStore:
             "expeditions": {
                 "warriors": expedition_warriors,
                 "risk_mode": expedition_mode,
+                "roll_modifier": expedition_roll_modifier,
             },
             "outposts": {
                 "unlocked": bool(outposts_source.get("unlocked", outpost_default["unlocked"])),
@@ -169,6 +177,7 @@ class ExtendedSystemsStore:
         *,
         warriors: int,
         risk_mode: str,
+        roll_modifier: int,
     ) -> dict[str, Any]:
         entry = self.get(guild_id, difficulty_id)
         mode = str(risk_mode).lower()
@@ -177,6 +186,7 @@ class ExtendedSystemsStore:
         entry["expeditions"] = {
             "warriors": max(1, int(warriors)),
             "risk_mode": mode,
+            "roll_modifier": int(roll_modifier),
         }
         return self.save(guild_id, entry)
 
