@@ -17,6 +17,7 @@ DEFAULT_GAME_STATE.update(
         "difficulty": "normal",
         "next_void_surge_week": None,
         "void_surge_count": 0,
+        "void_base_shift": 0,
         "weekly": dict(DEFAULT_WEEKLY_CHANGES),
         "votes": {},
     }
@@ -99,6 +100,7 @@ class InterfaceStore:
             "cum": 0,
             "next_void_surge_week": source.get("next_void_surge_week"),
             "void_surge_count": max(0, int(source.get("void_surge_count", 0))),
+            "void_base_shift": max(0, int(source.get("void_base_shift", 0))),
             "weekly": weekly,
             "votes": source.get("votes", {}) if isinstance(source.get("votes", {}), dict) else {},
         }
@@ -222,8 +224,6 @@ class InterfaceStore:
             entry["nourishment"] = clamp(int(entry.get("nourishment", 0)) + int(weekly.get("nourishment", 0)), 0, 100)
             entry["crime"] = clamp(int(entry.get("crime", 0)) + int(weekly.get("crime", 0)), 0, 100)
 
-            # Barrier generation and Void damage are separate. Current pressure damages
-            # the Barrier this week; pressure growth below affects the next week.
             pressure_at_start = clamp(int(entry.get("void_pressure", 0)), 0, 9999)
             summary["barrier_damage"] = pressure_at_start
             entry["barrier"] = clamp(
@@ -241,37 +241,46 @@ class InterfaceStore:
 
             progression = difficulty.get("void_progression", {})
             era = get_void_era(difficulty, week)
-            passive = int(era.get("passive_per_week", 0))
-            pressure = pressure_at_start + int(weekly.get("void_pressure", 0)) + passive
+            base_shift = max(0, int(entry.get("void_base_shift", 0)))
+            band_min = clamp(int(era.get("pressure_min", 0)) + base_shift, 0, 9999)
+            band_max = clamp(int(era.get("pressure_max", 9999)) + base_shift, band_min, 9999)
+
+            # Normal Void behaviour is banded rather than endlessly cumulative.
+            # A surge may temporarily exceed the band, but the following week settles
+            # back into the current baseline range.
+            pressure = clamp(pressure_at_start, band_min, band_max)
 
             interval = max(0, int(progression.get("pressure_check_interval", 0)))
             if interval and week % interval == 0:
                 roll = random.randint(1, 20)
-                dc = int(era.get("dc", 10))
-                multiplier = float(era.get("roll_multiplier", 1.0))
+                dc = int(era.get("dc", 12))
 
                 if roll == 20:
-                    change = int(progression.get("natural_20_change", -10))
+                    change = int(progression.get("natural_20_change", -5))
                     outcome = "natural_20"
                 elif roll == 1:
-                    change = math.ceil(int(progression.get("natural_1_change", 30)) * multiplier)
+                    change = int(progression.get("natural_1_change", 6))
                     outcome = "natural_1"
                 elif roll >= dc:
-                    change = math.ceil(int(progression.get("pass_change", 10)) * multiplier)
+                    change = int(progression.get("pass_change", -2))
                     outcome = "pass"
                 else:
-                    change = math.ceil(int(progression.get("fail_change", 20)) * multiplier)
+                    change = int(progression.get("fail_change", 3))
                     outcome = "fail"
 
-                pressure += change
+                pressure = clamp(pressure + change, band_min, band_max)
                 summary["void_roll"] = {
                     "roll": roll,
                     "dc": dc,
                     "outcome": outcome,
                     "change": change,
+                    "band_min": band_min,
+                    "band_max": band_max,
                 }
 
-            pressure = clamp(pressure, 0, 9999)
+            # Manual weekly Void Pressure remains an admin/game modifier and may push
+            # the value slightly outside the automatic difficulty band.
+            pressure = clamp(pressure + int(weekly.get("void_pressure", 0)), 0, 9999)
 
             surge_rules = progression.get("major_surges", {})
             scheduled = entry.get("next_void_surge_week")
@@ -281,11 +290,14 @@ class InterfaceStore:
                 count = max(0, int(entry.get("void_surge_count", 0)))
                 start = float(surge_rules.get("multiplier_start", 1.2))
                 step = float(surge_rules.get("multiplier_step", 0.1))
-                maximum = float(surge_rules.get("multiplier_max", 2.0))
+                maximum = float(surge_rules.get("multiplier_max", 1.6))
                 multiplier = min(maximum, start + (count * step))
 
                 before = pressure
                 pressure = clamp(math.ceil(pressure * multiplier), 0, 9999)
+
+                shift = max(0, int(surge_rules.get("base_shift_per_surge", 5)))
+                entry["void_base_shift"] = base_shift + shift
 
                 announcements = surge_rules.get("announcements", [])
                 announcement = random.choice(announcements) if isinstance(announcements, list) and announcements else {}
@@ -294,6 +306,7 @@ class InterfaceStore:
                     "multiplier": multiplier,
                     "before": before,
                     "after": pressure,
+                    "base_shift": shift,
                     "title": str(announcement.get("title", "🌑 MAJOR VOID SURGE")),
                     "text": str(announcement.get("text", "The Void surges against Aethelgard.")),
                 }
@@ -321,6 +334,7 @@ class InterfaceStore:
                 "weekly": dict(weekly),
                 "next_void_surge_week": initial_surge_week(difficulty),
                 "void_surge_count": 0,
+                "void_base_shift": 0,
                 "votes": old_entry.get("votes", {}),
             }
         )
