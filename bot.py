@@ -64,6 +64,8 @@ def user_can_manage_guild(interaction: discord.Interaction) -> bool:
 def make_interface_embed(guild: discord.Guild, state: dict) -> discord.Embed:
     weekly = state.get("weekly", {})
     workforce = state.get("workforce", {})
+    active_surge = state.get("active_void_surge")
+
     week = int(state.get("week", 1))
     food = int(state.get("food", 0))
     materials = int(state.get("materials", 0))
@@ -83,6 +85,13 @@ def make_interface_embed(guild: discord.Guild, state: dict) -> discord.Embed:
     food_net = food_income - food_consumption
     barrier_generation = int(weekly.get("barrier", 0))
     barrier_net = barrier_generation - void_pressure
+
+    surge_line = ""
+    if isinstance(active_surge, dict):
+        surge_line = (
+            f"⚠️ **Void Surge Active:** ×{float(active_surge.get('multiplier', 1.0)):.2f} "
+            f"through Week {int(active_surge.get('end_week', week))}\n"
+        )
 
     description = (
         "### Resources\n"
@@ -115,6 +124,7 @@ def make_interface_embed(guild: discord.Guild, state: dict) -> discord.Embed:
         f"↳ Generation: {format_change(barrier_generation)} | Void Pressure: -{void_pressure}\n"
         f"{progress_bar(barrier, filled='🟦')}\n"
         f"**Void Pressure:** {void_pressure}/9999\n"
+        f"{surge_line}"
         f"**Corruption:** {corruption}/100 ({format_change(int(weekly.get('corruption', 0)))}/week)\n"
         f"{progress_bar(corruption, filled='🟪')}"
     )
@@ -144,6 +154,31 @@ async def refresh_saved_interface(guild: discord.Guild, state: dict) -> None:
     try:
         message = await channel.fetch_message(int(message_id))
         await message.edit(embed=make_interface_embed(guild, state), view=InterfaceView())
+    except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+        pass
+
+
+async def delete_void_surge_message(guild: discord.Guild, surge: dict | None) -> None:
+    if not isinstance(surge, dict):
+        return
+    channel_id = surge.get("channel_id")
+    message_id = surge.get("message_id")
+    if not channel_id or not message_id:
+        return
+
+    channel = guild.get_channel(int(channel_id))
+    if not isinstance(channel, discord.TextChannel):
+        try:
+            fetched = await guild.fetch_channel(int(channel_id))
+        except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+            return
+        if not isinstance(fetched, discord.TextChannel):
+            return
+        channel = fetched
+
+    try:
+        message = await channel.fetch_message(int(message_id))
+        await message.delete()
     except (discord.NotFound, discord.Forbidden, discord.HTTPException):
         pass
 
@@ -351,7 +386,10 @@ class WorkforceRatioModal(discord.ui.Modal, title="Workforce Ratios"):
             await interaction.response.send_message("Ratios cannot be negative.", ephemeral=True)
             return
         if sum(ratio.values()) != 100:
-            await interaction.response.send_message(f"Workforce ratios must total **100%**. Current total: **{sum(ratio.values())}%**.", ephemeral=True)
+            await interaction.response.send_message(
+                f"Workforce ratios must total **100%**. Current total: **{sum(ratio.values())}%**.",
+                ephemeral=True,
+            )
             return
 
         await interaction.response.send_message(
@@ -447,10 +485,13 @@ class DifficultySelect(discord.ui.Select):
         if interaction.guild is None:
             return
 
+        old_state = store.get(interaction.guild.id) or {}
+        old_surge = old_state.get("active_void_surge")
         difficulty_id = self.values[0]
         state = store.reset_game(interaction.guild.id, difficulty_id)
         await interaction.response.edit_message(content=f"New game started on **{difficulty_id.title()}** difficulty.", view=None)
         await refresh_saved_interface(interaction.guild, state)
+        await delete_void_surge_message(interaction.guild, old_surge)
 
 
 class DifficultyResetView(discord.ui.View):
@@ -516,6 +557,10 @@ class InterfaceView(discord.ui.View):
         state, summary = store.advance_week(interaction.guild.id)
         await interaction.response.edit_message(embed=make_interface_embed(interaction.guild, state), view=self)
 
+        expired = summary.get("expired_void_surge")
+        if expired:
+            await delete_void_surge_message(interaction.guild, expired)
+
         surge = summary.get("void_surge")
         if surge and interaction.channel is not None:
             embed = discord.Embed(
@@ -523,11 +568,14 @@ class InterfaceView(discord.ui.View):
                 description=(
                     f"{surge.get('text', '')}\n\n"
                     f"**Major Void Surge #{surge.get('number', '?')}**\n"
-                    f"**Void Pressure ×{float(surge.get('multiplier', 1.0)):.2f}**\n"
-                    f"{surge.get('before', 0)} → **{surge.get('after', 0)}**"
+                    f"**Duration:** {surge.get('duration_weeks', 5)} weeks "
+                    f"(Week {surge.get('start_week', '?')}–{surge.get('end_week', '?')})\n"
+                    f"**Void Pressure:** ×{float(surge.get('multiplier', 1.0)):.2f} while active\n"
+                    f"**Initial surge:** {surge.get('before', 0)} → **{surge.get('after', 0)}**"
                 ),
             )
-            await interaction.channel.send(embed=embed)
+            message = await interaction.channel.send(embed=embed)
+            store.set_void_surge_message(interaction.guild.id, message.channel.id, message.id)
 
     @discord.ui.button(label="Reset Game", style=discord.ButtonStyle.danger, custom_id="aethelgard:reset_game")
     async def reset_game(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
@@ -535,7 +583,11 @@ class InterfaceView(discord.ui.View):
         if not user_can_manage_guild(interaction):
             await interaction.response.send_message("You need the **Manage Server** permission to reset the game.", ephemeral=True)
             return
-        await interaction.response.send_message("Choose the difficulty for the new game:", view=DifficultyResetView(interaction.user.id), ephemeral=True)
+        await interaction.response.send_message(
+            "Choose the difficulty for the new game:",
+            view=DifficultyResetView(interaction.user.id),
+            ephemeral=True,
+        )
 
 
 @bot.event
