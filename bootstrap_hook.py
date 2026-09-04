@@ -34,6 +34,7 @@ def install_bootstrap() -> None:
             from button_text_cleanup import install as install_button_text_cleanup
             from v1_adjustments import install as install_v1_adjustments
             from v1_1_adjustments import install as install_v1_1_adjustments
+            from corruption_removal import install as install_corruption_removal
 
             install(main)
             install_expedition_system(main)
@@ -43,6 +44,7 @@ def install_bootstrap() -> None:
             install_button_text_cleanup(main)
             install_v1_adjustments(main)
             install_v1_1_adjustments(main)
-        return _ORIGINAL_RUN(self, *args, **kwargs)
+            install_corruption_removal(main)
+        return _ORIGINAL_RUN(self, *args: Any, **kwargs: Any)
 
     commands.Bot.run = run_with_aethelgard_systems
