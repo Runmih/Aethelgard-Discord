@@ -16,7 +16,33 @@
     "void_pressure": 0,
     "nourishment": 50,
     "crime": 0,
-    "cum": 0
+    "cum": 0,
+    "workforce": {
+      "scientists": 5,
+      "priestesses": 5,
+      "engineers": 5,
+      "warriors": 5
+    },
+    "workforce_policy": {
+      "minimum": {
+        "scientists": 0,
+        "priestesses": 0,
+        "engineers": 0,
+        "warriors": 0
+      },
+      "ratio": {
+        "scientists": 25,
+        "priestesses": 25,
+        "engineers": 25,
+        "warriors": 25
+      },
+      "priority": [
+        "scientists",
+        "priestesses",
+        "engineers",
+        "warriors"
+      ]
+    }
   },
   "weekly_defaults": {
     "food": 0,
