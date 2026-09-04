@@ -57,6 +57,76 @@
     "void_pressure": 0,
     "corruption": 0
   },
+  "food_nourishment": {
+    "food_per_citizen": 10,
+    "full_feed_nourishment_gain": 5,
+    "unfed_percent_divisor": 5,
+    "starvation_death_dc": 16,
+    "starvation_death_percent": [2, 5],
+    "starvation_critical_death_percent": [5, 10],
+    "tiers": [
+      {
+        "id": "starving",
+        "label": "Starving",
+        "emoji": "🟥",
+        "min": 0,
+        "max": 20,
+        "crime": 10,
+        "faith": -10,
+        "corruption": 3,
+        "birthrate": 0,
+        "growth": 0
+      },
+      {
+        "id": "undernourished",
+        "label": "Undernourished",
+        "emoji": "🟧",
+        "min": 21,
+        "max": 40,
+        "crime": 5,
+        "faith": -5,
+        "corruption": 1,
+        "birthrate": 0,
+        "growth": 0
+      },
+      {
+        "id": "stable",
+        "label": "Stable",
+        "emoji": "🟨",
+        "min": 41,
+        "max": 60,
+        "crime": 0,
+        "faith": 0,
+        "corruption": 0,
+        "birthrate": 0,
+        "growth": 0
+      },
+      {
+        "id": "well_fed",
+        "label": "Well Fed",
+        "emoji": "🟩",
+        "min": 61,
+        "max": 80,
+        "crime": 0,
+        "faith": 5,
+        "corruption": -1,
+        "birthrate": 0,
+        "growth": 0
+      },
+      {
+        "id": "abundant",
+        "label": "Abundant",
+        "emoji": "🟦",
+        "min": 81,
+        "max": 100,
+        "crime": 0,
+        "faith": 10,
+        "corruption": -2,
+        "birthrate": 5,
+        "growth": 5
+      }
+    ]
+  },
   "void_progression": {
     "pressure_check_interval": 5,
     "natural_20_change": -5,
