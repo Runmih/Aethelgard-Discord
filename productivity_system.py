@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from difficulty_store import load_difficulty
+from healthcare_system import get_healthcare_tier
 
 
 def _difficulty_for(state: dict[str, Any]) -> dict[str, Any]:
@@ -52,6 +53,7 @@ def get_nourishment_productivity_tier(state: dict[str, Any]) -> dict[str, Any]:
 def get_workforce_multiplier_breakdown(state: dict[str, Any]) -> list[dict[str, Any]]:
     nourishment = get_nourishment_productivity_tier(state)
     faith = get_faith_tier(state)
+    healthcare = get_healthcare_tier(state)
     return [
         {
             "source": "Nourishment",
@@ -62,6 +64,11 @@ def get_workforce_multiplier_breakdown(state: dict[str, Any]) -> list[dict[str, 
             "source": "Faith",
             "label": str(faith.get("label", "Steady")),
             "multiplier": max(0.0, float(faith.get("workforce_multiplier", 1.0))),
+        },
+        {
+            "source": "Healthcare",
+            "label": str(healthcare.get("label", "Healthy")),
+            "multiplier": max(0.0, float(healthcare.get("workforce_multiplier", 1.0))),
         },
     ]
 
@@ -91,3 +98,10 @@ def get_effective_weekly_food(state: dict[str, Any]) -> dict[str, Any]:
         "multiplier": multiplier,
         "breakdown": get_workforce_multiplier_breakdown(state),
     }
+
+
+# bot.py imports this module during startup. The bootstrap waits until Bot.run,
+# then attaches the optional extended systems after bot.py is fully defined.
+from bootstrap_hook import install_bootstrap
+
+install_bootstrap()
