@@ -42,6 +42,7 @@ class ExtendedSystemsStore:
         return {
             "difficulty": difficulty_id,
             "void_exposure": 0.0,
+            "weekly_void_exposure": 0,
             "patients": 0,
             "healthcare_capacity": max(0, int(healthcare_rules.get("starting_capacity", 0))),
             "expeditions": {
@@ -52,7 +53,8 @@ class ExtendedSystemsStore:
                 "roll_modifier": int(expedition_rules.get("default_roll_modifier", 0)),
             },
             "outposts": {
-                "unlocked": bool(outpost_rules.get("default_unlocked", False)),
+                # Outposts no longer have a separate unlock switch. Count 0 means none.
+                "unlocked": True,
                 "count": 0,
                 "warriors_per_outpost": max(
                     1, int(outpost_rules.get("default_warriors_per_outpost", 5))
@@ -110,6 +112,7 @@ class ExtendedSystemsStore:
         normalized = {
             "difficulty": difficulty_id,
             "void_exposure": max(0.0, min(100.0, float(source.get("void_exposure", 0.0)))),
+            "weekly_void_exposure": int(source.get("weekly_void_exposure", 0)),
             "patients": max(0, int(source.get("patients", 0))),
             "healthcare_capacity": max(
                 0, int(source.get("healthcare_capacity", default["healthcare_capacity"]))
@@ -120,7 +123,8 @@ class ExtendedSystemsStore:
                 "roll_modifier": expedition_roll_modifier,
             },
             "outposts": {
-                "unlocked": bool(outposts_source.get("unlocked", outpost_default["unlocked"])),
+                # Older saves may contain unlocked=false. Ignore it now.
+                "unlocked": True,
                 "count": max(0, int(outposts_source.get("count", 0))),
                 "warriors_per_outpost": max(
                     1,
@@ -195,7 +199,7 @@ class ExtendedSystemsStore:
         guild_id: int,
         difficulty_id: str,
         *,
-        unlocked: bool,
+        unlocked: bool = True,
         count: int,
         warriors_per_outpost: int,
         risk_mode: str,
@@ -205,8 +209,8 @@ class ExtendedSystemsStore:
         if mode not in RISK_MODES:
             raise ValueError("Unknown outpost risk mode")
         entry["outposts"] = {
-            "unlocked": bool(unlocked),
-            "count": max(0, int(count)) if unlocked else 0,
+            "unlocked": True,
+            "count": max(0, int(count)),
             "warriors_per_outpost": max(1, int(warriors_per_outpost)),
             "risk_mode": mode,
         }
@@ -228,6 +232,16 @@ class ExtendedSystemsStore:
     def set_void_exposure(self, guild_id: int, difficulty_id: str, value: float) -> dict[str, Any]:
         entry = self.get(guild_id, difficulty_id)
         entry["void_exposure"] = max(0.0, min(100.0, float(value)))
+        return self.save(guild_id, entry)
+
+    def set_weekly_void_exposure(
+        self,
+        guild_id: int,
+        difficulty_id: str,
+        value: int,
+    ) -> dict[str, Any]:
+        entry = self.get(guild_id, difficulty_id)
+        entry["weekly_void_exposure"] = int(value)
         return self.save(guild_id, entry)
 
     def enrich(self, guild_id: int, state: dict[str, Any]) -> dict[str, Any]:
