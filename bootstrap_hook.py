@@ -28,9 +28,11 @@ def install_bootstrap() -> None:
         if main is not None and getattr(main, "bot", None) is self:
             from extended_systems import install
             from expedition_system import install as install_expedition_system
+            from crime_system import install as install_crime_system
 
             install(main)
             install_expedition_system(main)
+            install_crime_system(main)
         return _ORIGINAL_RUN(self, *args, **kwargs)
 
     commands.Bot.run = run_with_aethelgard_systems
