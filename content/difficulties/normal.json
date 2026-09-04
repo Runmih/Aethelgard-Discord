@@ -1,0 +1,75 @@
+{
+  "id": "normal",
+  "name": "Normal",
+  "description": "Standard Aethelgard progression with steadily increasing Void pressure and occasional major surges.",
+  "starting_state": {
+    "week": 1,
+    "food": 2000,
+    "materials": 500,
+    "citizens": 20,
+    "children": 0,
+    "faith": 50,
+    "corruption": 20,
+    "birthrate": 0,
+    "growth": 0,
+    "barrier": 100,
+    "void_pressure": 0,
+    "nourishment": 50,
+    "crime": 0,
+    "cum": 0
+  },
+  "weekly_defaults": {
+    "food": 0,
+    "materials": 0,
+    "cum": 7,
+    "birthrate": 0,
+    "growth": 1,
+    "nourishment": 0,
+    "crime": 0,
+    "faith": 0,
+    "barrier": 0,
+    "void_pressure": 0,
+    "corruption": 0
+  },
+  "void_progression": {
+    "pressure_check_interval": 5,
+    "natural_20_change": -10,
+    "pass_change": 10,
+    "fail_change": 20,
+    "natural_1_change": 30,
+    "eras": [
+      {"start_week": 1, "end_week": 20, "passive_per_week": 1, "dc": 11, "roll_multiplier": 1.0},
+      {"start_week": 21, "end_week": 50, "passive_per_week": 1, "dc": 12, "roll_multiplier": 1.0},
+      {"start_week": 51, "end_week": 100, "passive_per_week": 2, "dc": 13, "roll_multiplier": 1.25},
+      {"start_week": 101, "end_week": 150, "passive_per_week": 3, "dc": 14, "roll_multiplier": 1.5},
+      {"start_week": 151, "end_week": 200, "passive_per_week": 4, "dc": 15, "roll_multiplier": 1.75},
+      {"start_week": 201, "end_week": null, "passive_per_week": 5, "dc": 16, "roll_multiplier": 2.0}
+    ],
+    "major_surges": {
+      "first_window": [45, 55],
+      "interval_weeks": 50,
+      "jitter_weeks": 10,
+      "multiplier_start": 1.2,
+      "multiplier_step": 0.1,
+      "multiplier_max": 2.0,
+      "announcements": [
+        {
+          "title": "🌑 MASS AT THE BARRIER",
+          "text": "The darkness beyond Aethelgard is moving. Hundreds of shapes gather outside the Barrier and throw themselves against the light in relentless waves. The shield holds. For now."
+        },
+        {
+          "title": "⛈️ VOIDSTORM",
+          "text": "The sky turns black. Lightning crawls across the Barrier without thunder, leaving violet scars hanging in the air. Beyond the city, the Void churns like a stormfront, and something enormous moves inside it."
+        },
+        {
+          "title": "🌧️ BLACK RAIN",
+          "text": "Rain begins falling across Aethelgard, but never reaches the ground. Every droplet becomes black mist and rises toward the Barrier as the entire shield starts to hum under mounting pressure."
+        },
+        {
+          "title": "🔇 THE SILENT SURGE",
+          "text": "For several minutes the Void becomes completely still. No creatures. No wind. No movement. Then the entire Barrier bends inward at once and a deep vibration rolls through every building in Aethelgard."
+        }
+      ]
+    }
+  }
+}
