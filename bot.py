@@ -8,7 +8,7 @@ from discord import app_commands
 from discord.ext import commands
 from dotenv import load_dotenv
 
-from config_store import DEFAULT_GAME_STATE, InterfaceStore
+from config_store import DEFAULT_GAME_STATE, WORKFORCE_ROLES, InterfaceStore
 from difficulty_store import list_difficulties
 
 ENV_PATH = Path(".env")
@@ -19,6 +19,13 @@ DISCORD_TOKEN=
 DISCORD_GUILD_ID=
 """
 SEPARATOR = "━━━━━━━━━━━━━━━━━━━━"
+
+ROLE_LABELS = {
+    "scientists": "Scientists",
+    "priestesses": "Priestesses",
+    "engineers": "Engineers",
+    "warriors": "Warriors",
+}
 
 
 def ensure_env_file() -> None:
@@ -56,6 +63,7 @@ def user_can_manage_guild(interaction: discord.Interaction) -> bool:
 
 def make_interface_embed(guild: discord.Guild, state: dict) -> discord.Embed:
     weekly = state.get("weekly", {})
+    workforce = state.get("workforce", {})
     week = int(state.get("week", 1))
     food = int(state.get("food", 0))
     materials = int(state.get("materials", 0))
@@ -85,6 +93,11 @@ def make_interface_embed(guild: discord.Guild, state: dict) -> discord.Embed:
         f"{SEPARATOR}\n"
         "### Population\n"
         f"**Citizens:** {citizens}\n"
+        "**Workforce**\n"
+        f"🔬 Scientists: {int(workforce.get('scientists', 0))}\n"
+        f"🙏 Priestesses: {int(workforce.get('priestesses', 0))}\n"
+        f"⚙️ Engineers: {int(workforce.get('engineers', 0))}\n"
+        f"⚔️ Warriors: {int(workforce.get('warriors', 0))}\n"
         f"**Children:** {children}\n"
         f"**Birthrate:** {birthrate}/100 ({format_change(int(weekly.get('birthrate', 0)))}/week)\n"
         f"**Growth:** {growth}/728 ({format_change(int(weekly.get('growth', 1)))}/week while children exist)\n\n"
@@ -169,12 +182,7 @@ class WeeklyResourcesModal(discord.ui.Modal, title="Weekly Resources"):
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         try:
-            state = store.set_weekly_group(
-                interaction.guild.id,
-                food=int(str(self.food)),
-                materials=int(str(self.materials)),
-                cum=int(str(self.cum)),
-            )
+            state = store.set_weekly_group(interaction.guild.id, food=int(str(self.food)), materials=int(str(self.materials)), cum=int(str(self.cum)))
         except (ValueError, AttributeError):
             await interaction.response.send_message("All values must be whole numbers.", ephemeral=True)
             return
@@ -193,11 +201,7 @@ class WeeklyPopulationModal(discord.ui.Modal, title="Weekly Population"):
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         try:
-            state = store.set_weekly_group(
-                interaction.guild.id,
-                birthrate=int(str(self.birthrate)),
-                growth=int(str(self.growth)),
-            )
+            state = store.set_weekly_group(interaction.guild.id, birthrate=int(str(self.birthrate)), growth=int(str(self.growth)))
         except (ValueError, AttributeError):
             await interaction.response.send_message("All values must be whole numbers.", ephemeral=True)
             return
@@ -217,12 +221,7 @@ class WeeklyStabilityModal(discord.ui.Modal, title="Weekly City Stability"):
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         try:
-            state = store.set_weekly_group(
-                interaction.guild.id,
-                nourishment=int(str(self.nourishment)),
-                crime=int(str(self.crime)),
-                faith=int(str(self.faith)),
-            )
+            state = store.set_weekly_group(interaction.guild.id, nourishment=int(str(self.nourishment)), crime=int(str(self.crime)), faith=int(str(self.faith)))
         except (ValueError, AttributeError):
             await interaction.response.send_message("All values must be whole numbers.", ephemeral=True)
             return
@@ -242,12 +241,7 @@ class WeeklyVoidModal(discord.ui.Modal, title="Weekly Barrier & Void"):
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         try:
-            state = store.set_weekly_group(
-                interaction.guild.id,
-                barrier=int(str(self.barrier)),
-                void_pressure=int(str(self.void_pressure)),
-                corruption=int(str(self.corruption)),
-            )
+            state = store.set_weekly_group(interaction.guild.id, barrier=int(str(self.barrier)), void_pressure=int(str(self.void_pressure)), corruption=int(str(self.corruption)))
         except (ValueError, AttributeError):
             await interaction.response.send_message("All values must be whole numbers.", ephemeral=True)
             return
@@ -255,15 +249,188 @@ class WeeklyVoidModal(discord.ui.Modal, title="Weekly Barrier & Void"):
         await refresh_saved_interface(interaction.guild, state)
 
 
+def workforce_defaults(state: dict) -> tuple[dict[str, int], dict[str, int], list[str]]:
+    policy = state.get("workforce_policy", {})
+    minimum = policy.get("minimum", {})
+    ratio = policy.get("ratio", {})
+    priority = policy.get("priority", list(WORKFORCE_ROLES))
+    return (
+        {role: int(minimum.get(role, 0)) for role in WORKFORCE_ROLES},
+        {role: int(ratio.get(role, 25)) for role in WORKFORCE_ROLES},
+        list(priority),
+    )
+
+
+class WorkforceMinimumModal(discord.ui.Modal, title="Workforce Minimums"):
+    def __init__(self, owner_id: int, state: dict) -> None:
+        super().__init__()
+        self.owner_id = owner_id
+        minimum, ratio, priority = workforce_defaults(state)
+        self.ratio_defaults = ratio
+        self.priority_defaults = priority
+        self.scientists = discord.ui.TextInput(label="Scientists minimum", default=str(minimum["scientists"]), required=True)
+        self.priestesses = discord.ui.TextInput(label="Priestesses minimum", default=str(minimum["priestesses"]), required=True)
+        self.engineers = discord.ui.TextInput(label="Engineers minimum", default=str(minimum["engineers"]), required=True)
+        self.warriors = discord.ui.TextInput(label="Warriors minimum", default=str(minimum["warriors"]), required=True)
+        for item in (self.scientists, self.priestesses, self.engineers, self.warriors):
+            self.add_item(item)
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        if interaction.user.id != self.owner_id:
+            await interaction.response.send_message("This workforce setup belongs to another user.", ephemeral=True)
+            return
+        try:
+            minimum = {
+                "scientists": int(str(self.scientists)),
+                "priestesses": int(str(self.priestesses)),
+                "engineers": int(str(self.engineers)),
+                "warriors": int(str(self.warriors)),
+            }
+        except ValueError:
+            await interaction.response.send_message("Minimums must be whole numbers.", ephemeral=True)
+            return
+        if any(value < 0 for value in minimum.values()):
+            await interaction.response.send_message("Minimums cannot be negative.", ephemeral=True)
+            return
+
+        await interaction.response.send_message(
+            "Minimums captured. Continue to workforce ratios.",
+            view=WorkforceRatioContinueView(self.owner_id, minimum, self.ratio_defaults, self.priority_defaults),
+            ephemeral=True,
+        )
+
+
+class WorkforceRatioContinueView(discord.ui.View):
+    def __init__(self, owner_id: int, minimum: dict[str, int], ratio_defaults: dict[str, int], priority_defaults: list[str]) -> None:
+        super().__init__(timeout=300)
+        self.owner_id = owner_id
+        self.minimum = minimum
+        self.ratio_defaults = ratio_defaults
+        self.priority_defaults = priority_defaults
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.owner_id:
+            await interaction.response.send_message("This workforce setup belongs to another user.", ephemeral=True)
+            return False
+        return True
+
+    @discord.ui.button(label="Continue to Ratios", style=discord.ButtonStyle.primary)
+    async def continue_to_ratios(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        del button
+        await interaction.response.send_modal(WorkforceRatioModal(self.owner_id, self.minimum, self.ratio_defaults, self.priority_defaults))
+
+
+class WorkforceRatioModal(discord.ui.Modal, title="Workforce Ratios"):
+    def __init__(self, owner_id: int, minimum: dict[str, int], ratio_defaults: dict[str, int], priority_defaults: list[str]) -> None:
+        super().__init__()
+        self.owner_id = owner_id
+        self.minimum = minimum
+        self.priority_defaults = priority_defaults
+        self.scientists = discord.ui.TextInput(label="Scientists %", default=str(ratio_defaults["scientists"]), required=True)
+        self.priestesses = discord.ui.TextInput(label="Priestesses %", default=str(ratio_defaults["priestesses"]), required=True)
+        self.engineers = discord.ui.TextInput(label="Engineers %", default=str(ratio_defaults["engineers"]), required=True)
+        self.warriors = discord.ui.TextInput(label="Warriors %", default=str(ratio_defaults["warriors"]), required=True)
+        for item in (self.scientists, self.priestesses, self.engineers, self.warriors):
+            self.add_item(item)
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        if interaction.user.id != self.owner_id:
+            await interaction.response.send_message("This workforce setup belongs to another user.", ephemeral=True)
+            return
+        try:
+            ratio = {
+                "scientists": int(str(self.scientists)),
+                "priestesses": int(str(self.priestesses)),
+                "engineers": int(str(self.engineers)),
+                "warriors": int(str(self.warriors)),
+            }
+        except ValueError:
+            await interaction.response.send_message("Ratios must be whole percentages.", ephemeral=True)
+            return
+        if any(value < 0 for value in ratio.values()):
+            await interaction.response.send_message("Ratios cannot be negative.", ephemeral=True)
+            return
+        if sum(ratio.values()) != 100:
+            await interaction.response.send_message(f"Workforce ratios must total **100%**. Current total: **{sum(ratio.values())}%**.", ephemeral=True)
+            return
+
+        await interaction.response.send_message(
+            "Ratios captured. Continue to priority.",
+            view=WorkforcePriorityContinueView(self.owner_id, self.minimum, ratio, self.priority_defaults),
+            ephemeral=True,
+        )
+
+
+class WorkforcePriorityContinueView(discord.ui.View):
+    def __init__(self, owner_id: int, minimum: dict[str, int], ratio: dict[str, int], priority_defaults: list[str]) -> None:
+        super().__init__(timeout=300)
+        self.owner_id = owner_id
+        self.minimum = minimum
+        self.ratio = ratio
+        self.priority_defaults = priority_defaults
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.owner_id:
+            await interaction.response.send_message("This workforce setup belongs to another user.", ephemeral=True)
+            return False
+        return True
+
+    @discord.ui.button(label="Continue to Priority", style=discord.ButtonStyle.primary)
+    async def continue_to_priority(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        del button
+        await interaction.response.send_modal(WorkforcePriorityModal(self.owner_id, self.minimum, self.ratio, self.priority_defaults))
+
+
+class WorkforcePriorityModal(discord.ui.Modal, title="Workforce Priority"):
+    def __init__(self, owner_id: int, minimum: dict[str, int], ratio: dict[str, int], priority_defaults: list[str]) -> None:
+        super().__init__()
+        self.owner_id = owner_id
+        self.minimum = minimum
+        self.ratio = ratio
+        ranks = {role: index + 1 for index, role in enumerate(priority_defaults) if role in WORKFORCE_ROLES}
+        self.scientists = discord.ui.TextInput(label="Scientists priority (1-4)", default=str(ranks.get("scientists", 1)), required=True)
+        self.priestesses = discord.ui.TextInput(label="Priestesses priority (1-4)", default=str(ranks.get("priestesses", 2)), required=True)
+        self.engineers = discord.ui.TextInput(label="Engineers priority (1-4)", default=str(ranks.get("engineers", 3)), required=True)
+        self.warriors = discord.ui.TextInput(label="Warriors priority (1-4)", default=str(ranks.get("warriors", 4)), required=True)
+        for item in (self.scientists, self.priestesses, self.engineers, self.warriors):
+            self.add_item(item)
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        if interaction.user.id != self.owner_id:
+            await interaction.response.send_message("This workforce setup belongs to another user.", ephemeral=True)
+            return
+        try:
+            ranks = {
+                "scientists": int(str(self.scientists)),
+                "priestesses": int(str(self.priestesses)),
+                "engineers": int(str(self.engineers)),
+                "warriors": int(str(self.warriors)),
+            }
+        except ValueError:
+            await interaction.response.send_message("Priorities must be whole numbers from 1 to 4.", ephemeral=True)
+            return
+        if set(ranks.values()) != {1, 2, 3, 4}:
+            await interaction.response.send_message("Use each priority exactly once: **1, 2, 3, 4**.", ephemeral=True)
+            return
+        if interaction.guild is None:
+            return
+
+        priority = [role for role, rank in sorted(ranks.items(), key=lambda item: item[1])]
+        try:
+            state = store.set_workforce_policy(interaction.guild.id, minimum=self.minimum, ratio=self.ratio, priority=priority)
+        except ValueError as exc:
+            await interaction.response.send_message(str(exc), ephemeral=True)
+            return
+
+        await interaction.response.send_message("Workforce policy saved.", ephemeral=True)
+        await refresh_saved_interface(interaction.guild, state)
+
+
 class DifficultySelect(discord.ui.Select):
     def __init__(self) -> None:
         difficulties = list_difficulties()
         options = [
-            discord.SelectOption(
-                label=item["name"],
-                value=item["id"],
-                description=(item.get("description") or None),
-            )
+            discord.SelectOption(label=item["name"], value=item["id"], description=(item.get("description") or None))
             for item in difficulties
         ]
         if not options:
@@ -282,10 +449,7 @@ class DifficultySelect(discord.ui.Select):
 
         difficulty_id = self.values[0]
         state = store.reset_game(interaction.guild.id, difficulty_id)
-        await interaction.response.edit_message(
-            content=f"New game started on **{difficulty_id.title()}** difficulty.",
-            view=None,
-        )
+        await interaction.response.edit_message(content=f"New game started on **{difficulty_id.title()}** difficulty.", view=None)
         await refresh_saved_interface(interaction.guild, state)
 
 
@@ -312,14 +476,17 @@ class VoteView(discord.ui.View):
 
     @discord.ui.button(label="Pro", style=discord.ButtonStyle.success, custom_id="aethelgard:vote:pro")
     async def pro(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        del button
         await self.cast(interaction, "pro")
 
     @discord.ui.button(label="Con", style=discord.ButtonStyle.danger, custom_id="aethelgard:vote:con")
     async def con(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        del button
         await self.cast(interaction, "con")
 
     @discord.ui.button(label="Conclude Vote", style=discord.ButtonStyle.primary, custom_id="aethelgard:vote:conclude")
     async def conclude(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        del button
         vote = store.get_vote(interaction.guild.id, interaction.message.id)
         if not vote:
             await interaction.response.send_message("This vote could not be found.", ephemeral=True)
@@ -339,6 +506,7 @@ class InterfaceView(discord.ui.View):
 
     @discord.ui.button(label="Advance Week", style=discord.ButtonStyle.primary, custom_id="aethelgard:advance_week")
     async def advance_week(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        del button
         if not user_can_manage_guild(interaction):
             await interaction.response.send_message("You need the **Manage Server** permission to advance the week.", ephemeral=True)
             return
@@ -363,14 +531,11 @@ class InterfaceView(discord.ui.View):
 
     @discord.ui.button(label="Reset Game", style=discord.ButtonStyle.danger, custom_id="aethelgard:reset_game")
     async def reset_game(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        del button
         if not user_can_manage_guild(interaction):
             await interaction.response.send_message("You need the **Manage Server** permission to reset the game.", ephemeral=True)
             return
-        await interaction.response.send_message(
-            "Choose the difficulty for the new game:",
-            view=DifficultyResetView(interaction.user.id),
-            ephemeral=True,
-        )
+        await interaction.response.send_message("Choose the difficulty for the new game:", view=DifficultyResetView(interaction.user.id), ephemeral=True)
 
 
 @bot.event
@@ -455,6 +620,16 @@ async def weekly_void(interaction: discord.Interaction) -> None:
     await open_weekly_modal(interaction, WeeklyVoidModal(store.get(interaction.guild.id) or dict(DEFAULT_GAME_STATE)))
 
 
+@bot.tree.command(name="workforce_setup", description="Configure workforce minimums, ratios, and priority.")
+@app_commands.checks.has_permissions(manage_guild=True)
+async def workforce_setup(interaction: discord.Interaction) -> None:
+    if interaction.guild is None:
+        await interaction.response.send_message("This command can only be used inside a Discord server.", ephemeral=True)
+        return
+    state = store.get(interaction.guild.id) or dict(DEFAULT_GAME_STATE)
+    await interaction.response.send_modal(WorkforceMinimumModal(interaction.user.id, state))
+
+
 RESOURCE_CHOICES = [
     app_commands.Choice(name="Food", value="food"),
     app_commands.Choice(name="Materials", value="materials"),
@@ -484,6 +659,10 @@ async def addresource(interaction: discord.Interaction, resource_type: app_comma
         text += f" Created {summary['births']} child(ren)."
     if summary["matured"]:
         text += f" Matured {summary['matured']} child(ren)."
+        assigned = summary.get("workforce_added", {})
+        parts = [f"{ROLE_LABELS[role]} +{assigned.get(role, 0)}" for role in WORKFORCE_ROLES if assigned.get(role, 0)]
+        if parts:
+            text += " " + ", ".join(parts) + "."
     await interaction.response.send_message(text, ephemeral=True)
 
 
@@ -520,7 +699,7 @@ async def admin_error(interaction: discord.Interaction, error: app_commands.AppC
         await interaction.response.send_message(message, ephemeral=True)
 
 
-for command in (setup_interface, weekly_resources, weekly_population, weekly_stability, weekly_void, addresource):
+for command in (setup_interface, weekly_resources, weekly_population, weekly_stability, weekly_void, workforce_setup, addresource):
     command.error(admin_error)
 
 
