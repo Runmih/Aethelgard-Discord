@@ -9,6 +9,8 @@ from typing import Any, Callable
 from difficulty_store import get_void_era, load_difficulty
 
 
+WORKFORCE_ROLES = ("scientists", "priestesses", "engineers", "warriors")
+
 _NORMAL_DIFFICULTY = load_difficulty("normal")
 DEFAULT_WEEKLY_CHANGES = dict(_NORMAL_DIFFICULTY.get("weekly_defaults", {}))
 DEFAULT_GAME_STATE = dict(_NORMAL_DIFFICULTY.get("starting_state", {}))
@@ -26,6 +28,126 @@ DEFAULT_GAME_STATE.update(
 
 def clamp(value: int, minimum: int, maximum: int) -> int:
     return max(minimum, min(maximum, value))
+
+
+def _even_workforce(citizens: int) -> dict[str, int]:
+    citizens = max(0, int(citizens))
+    base, remainder = divmod(citizens, len(WORKFORCE_ROLES))
+    result = {role: base for role in WORKFORCE_ROLES}
+    for role in WORKFORCE_ROLES[:remainder]:
+        result[role] += 1
+    return result
+
+
+def _normalize_workforce_policy(source: Any, fallback: Any) -> dict[str, Any]:
+    source = source if isinstance(source, dict) else {}
+    fallback = fallback if isinstance(fallback, dict) else {}
+
+    fallback_minimum = fallback.get("minimum", {}) if isinstance(fallback.get("minimum", {}), dict) else {}
+    source_minimum = source.get("minimum", {}) if isinstance(source.get("minimum", {}), dict) else {}
+    minimum = {
+        role: max(0, int(source_minimum.get(role, fallback_minimum.get(role, 0))))
+        for role in WORKFORCE_ROLES
+    }
+
+    fallback_ratio = fallback.get("ratio", {}) if isinstance(fallback.get("ratio", {}), dict) else {}
+    source_ratio = source.get("ratio", {}) if isinstance(source.get("ratio", {}), dict) else {}
+    ratio = {
+        role: max(0, int(source_ratio.get(role, fallback_ratio.get(role, 25))))
+        for role in WORKFORCE_ROLES
+    }
+    if sum(ratio.values()) != 100:
+        ratio = {
+            role: max(0, int(fallback_ratio.get(role, 25)))
+            for role in WORKFORCE_ROLES
+        }
+    if sum(ratio.values()) != 100:
+        ratio = {role: 25 for role in WORKFORCE_ROLES}
+
+    raw_priority = source.get("priority", fallback.get("priority", list(WORKFORCE_ROLES)))
+    priority: list[str] = []
+    if isinstance(raw_priority, list):
+        for role in raw_priority:
+            role = str(role)
+            if role in WORKFORCE_ROLES and role not in priority:
+                priority.append(role)
+    for role in WORKFORCE_ROLES:
+        if role not in priority:
+            priority.append(role)
+
+    return {"minimum": minimum, "ratio": ratio, "priority": priority}
+
+
+def _select_workforce_role(entry: dict[str, Any]) -> str:
+    workforce = entry["workforce"]
+    policy = entry["workforce_policy"]
+    minimum = policy["minimum"]
+    ratio = policy["ratio"]
+    priority = policy["priority"]
+
+    shortages = {role for role in WORKFORCE_ROLES if workforce[role] < minimum[role]}
+    if shortages:
+        for role in priority:
+            if role in shortages:
+                return role
+
+    surplus = {
+        role: max(0, workforce[role] - minimum[role])
+        for role in WORKFORCE_ROLES
+    }
+    future_total = sum(surplus.values()) + 1
+    priority_index = {role: index for index, role in enumerate(priority)}
+
+    def score(role: str) -> tuple[float, int]:
+        target = future_total * ratio[role] / 100
+        deficit = target - surplus[role]
+        return deficit, -priority_index.get(role, len(WORKFORCE_ROLES))
+
+    return max(WORKFORCE_ROLES, key=score)
+
+
+def _assign_worker(entry: dict[str, Any]) -> str:
+    role = _select_workforce_role(entry)
+    entry["workforce"][role] += 1
+    return role
+
+
+def _remove_worker(entry: dict[str, Any]) -> str | None:
+    workforce = entry["workforce"]
+    policy = entry["workforce_policy"]
+    minimum = policy["minimum"]
+    ratio = policy["ratio"]
+    priority = policy["priority"]
+
+    candidates = [role for role in WORKFORCE_ROLES if workforce[role] > minimum[role]]
+    if candidates:
+        surplus = {role: max(0, workforce[role] - minimum[role]) for role in WORKFORCE_ROLES}
+        total_surplus = max(1, sum(surplus.values()))
+
+        def excess(role: str) -> float:
+            target = total_surplus * ratio[role] / 100
+            return surplus[role] - target
+
+        role = max(candidates, key=excess)
+    else:
+        role = next((role for role in reversed(priority) if workforce[role] > 0), None)
+
+    if role is not None:
+        workforce[role] -= 1
+    return role
+
+
+def _set_citizen_total(entry: dict[str, Any], target: int) -> None:
+    target = max(0, int(target))
+    current = max(0, int(entry.get("citizens", 0)))
+    while current < target:
+        _assign_worker(entry)
+        current += 1
+    while current > target:
+        if _remove_worker(entry) is None:
+            break
+        current -= 1
+    entry["citizens"] = current
 
 
 def initial_surge_week(difficulty: dict[str, Any]) -> int | None:
@@ -82,12 +204,27 @@ class InterfaceStore:
             for key, default in weekly_defaults.items()
         }
 
+        citizens = max(0, int(source.get("citizens", starting.get("citizens", 0))))
+        workforce_policy = _normalize_workforce_policy(
+            source.get("workforce_policy"),
+            starting.get("workforce_policy"),
+        )
+
+        source_workforce = source.get("workforce")
+        if isinstance(source_workforce, dict):
+            workforce = {
+                role: max(0, int(source_workforce.get(role, 0)))
+                for role in WORKFORCE_ROLES
+            }
+        else:
+            workforce = _even_workforce(citizens)
+
         normalized: dict[str, Any] = {
             "difficulty": difficulty_id,
             "week": int(source.get("week", starting.get("week", 1))),
             "food": max(0, int(source.get("food", starting.get("food", 0)))),
             "materials": max(0, int(source.get("materials", starting.get("materials", 0)))),
-            "citizens": max(0, int(source.get("citizens", starting.get("citizens", 0)))),
+            "citizens": citizens,
             "children": max(0, int(source.get("children", starting.get("children", 0)))),
             "faith": clamp(int(source.get("faith", starting.get("faith", 0))), 0, 100),
             "corruption": clamp(int(source.get("corruption", starting.get("corruption", 0))), 0, 100),
@@ -98,12 +235,23 @@ class InterfaceStore:
             "nourishment": clamp(int(source.get("nourishment", starting.get("nourishment", 0))), 0, 100),
             "crime": clamp(int(source.get("crime", starting.get("crime", 0))), 0, 100),
             "cum": 0,
+            "workforce": workforce,
+            "workforce_policy": workforce_policy,
             "next_void_surge_week": source.get("next_void_surge_week"),
             "void_surge_count": max(0, int(source.get("void_surge_count", 0))),
             "void_base_shift": max(0, int(source.get("void_base_shift", 0))),
             "weekly": weekly,
             "votes": source.get("votes", {}) if isinstance(source.get("votes", {}), dict) else {},
         }
+
+        workforce_total = sum(normalized["workforce"].values())
+        if workforce_total < citizens:
+            for _ in range(citizens - workforce_total):
+                _assign_worker(normalized)
+        elif workforce_total > citizens:
+            for _ in range(workforce_total - citizens):
+                _remove_worker(normalized)
+
         if normalized["next_void_surge_week"] is not None:
             normalized["next_void_surge_week"] = int(normalized["next_void_surge_week"])
 
@@ -142,6 +290,32 @@ class InterfaceStore:
 
         return self._update(guild_id, mutate)
 
+    def set_workforce_policy(
+        self,
+        guild_id: int,
+        *,
+        minimum: dict[str, int],
+        ratio: dict[str, int],
+        priority: list[str],
+    ) -> dict[str, Any]:
+        if set(minimum) != set(WORKFORCE_ROLES):
+            raise ValueError("Minimum must define every workforce role")
+        if set(ratio) != set(WORKFORCE_ROLES) or sum(int(v) for v in ratio.values()) != 100:
+            raise ValueError("Workforce ratios must define every role and total 100%")
+        if len(priority) != len(WORKFORCE_ROLES) or set(priority) != set(WORKFORCE_ROLES):
+            raise ValueError("Priority must rank every workforce role once")
+        if any(int(value) < 0 for value in minimum.values()):
+            raise ValueError("Minimum workforce values cannot be negative")
+        if any(int(value) < 0 for value in ratio.values()):
+            raise ValueError("Workforce ratios cannot be negative")
+
+        policy = {
+            "minimum": {role: int(minimum[role]) for role in WORKFORCE_ROLES},
+            "ratio": {role: int(ratio[role]) for role in WORKFORCE_ROLES},
+            "priority": list(priority),
+        }
+        return self._update(guild_id, lambda entry: entry.update({"workforce_policy": policy}))
+
     @staticmethod
     def _apply_birthrate(entry: dict[str, Any], change: int) -> int:
         total = max(0, int(entry.get("birthrate", 0)) + change)
@@ -151,22 +325,32 @@ class InterfaceStore:
         return births
 
     @staticmethod
-    def _apply_growth(entry: dict[str, Any], change: int) -> int:
+    def _apply_growth(entry: dict[str, Any], change: int) -> tuple[int, dict[str, int]]:
         children = max(0, int(entry.get("children", 0)))
+        assigned = {role: 0 for role in WORKFORCE_ROLES}
         if children <= 0:
             entry["growth"] = 0
-            return 0
+            return 0, assigned
 
         total = max(0, int(entry.get("growth", 0)) + change)
         possible, remainder = divmod(total, 728)
         matured = min(children, possible)
         entry["children"] = children - matured
-        entry["citizens"] = max(0, int(entry.get("citizens", 0))) + matured
-        entry["growth"] = remainder if entry["children"] > 0 else 0
-        return matured
 
-    def add_resource(self, guild_id: int, resource_type: str, value: int) -> tuple[dict[str, Any], dict[str, int]]:
-        summary = {"births": 0, "matured": 0}
+        for _ in range(matured):
+            entry["citizens"] = max(0, int(entry.get("citizens", 0))) + 1
+            role = _assign_worker(entry)
+            assigned[role] += 1
+
+        entry["growth"] = remainder if entry["children"] > 0 else 0
+        return matured, assigned
+
+    def add_resource(self, guild_id: int, resource_type: str, value: int) -> tuple[dict[str, Any], dict[str, Any]]:
+        summary: dict[str, Any] = {
+            "births": 0,
+            "matured": 0,
+            "workforce_added": {role: 0 for role in WORKFORCE_ROLES},
+        }
         aliases = {
             "material": "materials", "materials": "materials", "food": "food",
             "faith": "faith", "corruption": "corruption", "citizen": "citizens",
@@ -185,7 +369,12 @@ class InterfaceStore:
                 summary["births"] = self._apply_birthrate(entry, value)
                 return
             if target == "growth":
-                summary["matured"] = self._apply_growth(entry, value)
+                matured, assigned = self._apply_growth(entry, value)
+                summary["matured"] = matured
+                summary["workforce_added"] = assigned
+                return
+            if target == "citizens":
+                _set_citizen_total(entry, int(entry.get("citizens", 0)) + value)
                 return
 
             new_value = int(entry.get(target, 0)) + value
@@ -204,6 +393,7 @@ class InterfaceStore:
         summary: dict[str, Any] = {
             "births": 0,
             "matured": 0,
+            "workforce_added": {role: 0 for role in WORKFORCE_ROLES},
             "barrier_damage": 0,
             "void_roll": None,
             "void_surge": None,
@@ -236,7 +426,9 @@ class InterfaceStore:
 
             summary["births"] = self._apply_birthrate(entry, int(weekly.get("birthrate", 0)))
             if int(entry.get("children", 0)) > 0:
-                summary["matured"] = self._apply_growth(entry, int(weekly.get("growth", 1)))
+                matured, assigned = self._apply_growth(entry, int(weekly.get("growth", 1)))
+                summary["matured"] = matured
+                summary["workforce_added"] = assigned
             entry["cum"] = 0
 
             progression = difficulty.get("void_progression", {})
@@ -245,9 +437,6 @@ class InterfaceStore:
             band_min = clamp(int(era.get("pressure_min", 0)) + base_shift, 0, 9999)
             band_max = clamp(int(era.get("pressure_max", 9999)) + base_shift, band_min, 9999)
 
-            # Normal Void behaviour is banded rather than endlessly cumulative.
-            # A surge may temporarily exceed the band, but the following week settles
-            # back into the current baseline range.
             pressure = clamp(pressure_at_start, band_min, band_max)
 
             interval = max(0, int(progression.get("pressure_check_interval", 0)))
@@ -278,8 +467,6 @@ class InterfaceStore:
                     "band_max": band_max,
                 }
 
-            # Manual weekly Void Pressure remains an admin/game modifier and may push
-            # the value slightly outside the automatic difficulty band.
             pressure = clamp(pressure + int(weekly.get("void_pressure", 0)), 0, 9999)
 
             surge_rules = progression.get("major_surges", {})
@@ -362,6 +549,7 @@ class InterfaceStore:
 
     def cast_vote(self, guild_id: int, message_id: int, user_id: int, choice: str) -> dict[str, Any] | None:
         result: dict[str, Any] | None = None
+
         def mutate(entry: dict[str, Any]) -> None:
             nonlocal result
             votes = dict(entry.get("votes", {}))
@@ -383,11 +571,13 @@ class InterfaceStore:
             votes[str(message_id)] = vote
             entry["votes"] = votes
             result = dict(vote)
+
         self._update(guild_id, mutate)
         return result
 
     def conclude_vote(self, guild_id: int, message_id: int, passed: bool) -> dict[str, Any] | None:
         result: dict[str, Any] | None = None
+
         def mutate(entry: dict[str, Any]) -> None:
             nonlocal result
             votes = dict(entry.get("votes", {}))
@@ -398,5 +588,6 @@ class InterfaceStore:
             votes[str(message_id)] = vote
             entry["votes"] = votes
             result = dict(vote)
+
         self._update(guild_id, mutate)
         return result
