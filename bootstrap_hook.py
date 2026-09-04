@@ -30,11 +30,13 @@ def install_bootstrap() -> None:
             from expedition_system import install as install_expedition_system
             from crime_system import install as install_crime_system
             from interface_cleanup import install as install_interface_cleanup
+            from command_consolidation import install as install_command_consolidation
 
             install(main)
             install_expedition_system(main)
             install_crime_system(main)
             install_interface_cleanup(main)
+            install_command_consolidation(main)
         return _ORIGINAL_RUN(self, *args, **kwargs)
 
     commands.Bot.run = run_with_aethelgard_systems
