@@ -1,6 +1,7 @@
 .env
 state.json
 event_state.json
+systems_state.json
 __pycache__/
 *.pyc
 .venv/
