@@ -1,7 +1,7 @@
 {
   "id": "normal",
   "name": "Normal",
-  "description": "Standard Aethelgard progression with steadily increasing Void pressure and occasional major surges.",
+  "description": "Predictable, mostly stable Void pressure with occasional surges that permanently worsen the baseline a little.",
   "starting_state": {
     "week": 1,
     "food": 2000,
@@ -33,17 +33,25 @@
   },
   "void_progression": {
     "pressure_check_interval": 5,
-    "natural_20_change": -10,
-    "pass_change": 10,
-    "fail_change": 20,
-    "natural_1_change": 30,
+    "natural_20_change": -5,
+    "pass_change": -2,
+    "fail_change": 3,
+    "natural_1_change": 6,
     "eras": [
-      {"start_week": 1, "end_week": 20, "passive_per_week": 1, "dc": 11, "roll_multiplier": 1.0},
-      {"start_week": 21, "end_week": 50, "passive_per_week": 1, "dc": 12, "roll_multiplier": 1.0},
-      {"start_week": 51, "end_week": 100, "passive_per_week": 2, "dc": 13, "roll_multiplier": 1.25},
-      {"start_week": 101, "end_week": 150, "passive_per_week": 3, "dc": 14, "roll_multiplier": 1.5},
-      {"start_week": 151, "end_week": 200, "passive_per_week": 4, "dc": 15, "roll_multiplier": 1.75},
-      {"start_week": 201, "end_week": null, "passive_per_week": 5, "dc": 16, "roll_multiplier": 2.0}
+      {
+        "start_week": 1,
+        "end_week": 30,
+        "pressure_min": 5,
+        "pressure_max": 25,
+        "dc": 12
+      },
+      {
+        "start_week": 31,
+        "end_week": null,
+        "pressure_min": 10,
+        "pressure_max": 35,
+        "dc": 12
+      }
     ],
     "major_surges": {
       "first_window": [45, 55],
@@ -51,7 +59,8 @@
       "jitter_weeks": 10,
       "multiplier_start": 1.2,
       "multiplier_step": 0.1,
-      "multiplier_max": 2.0,
+      "multiplier_max": 1.6,
+      "base_shift_per_surge": 5,
       "announcements": [
         {
           "title": "🌑 MASS AT THE BARRIER",
