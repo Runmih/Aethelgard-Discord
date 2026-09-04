@@ -10,6 +10,8 @@ from dotenv import load_dotenv
 
 from config_store import DEFAULT_GAME_STATE, WORKFORCE_ROLES, InterfaceStore
 from difficulty_store import list_difficulties
+from event_store import EventStore
+from nourishment_system import apply_food_nourishment_week, get_nourishment_tier
 
 ENV_PATH = Path(".env")
 ENV_TEMPLATE = """# Discord bot token from the Discord Developer Portal
@@ -43,9 +45,16 @@ GUILD_ID_RAW = os.getenv("DISCORD_GUILD_ID", "").strip()
 intents = discord.Intents.default()
 bot = commands.Bot(command_prefix="!", intents=intents)
 store = InterfaceStore()
+event_store = EventStore()
 
 
-def progress_bar(value: int, maximum: int = 100, segments: int = 10, filled: str = "⬜", empty: str = "⬛") -> str:
+def progress_bar(
+    value: int,
+    maximum: int = 100,
+    segments: int = 10,
+    filled: str = "⬜",
+    empty: str = "⬛",
+) -> str:
     maximum = max(1, maximum)
     value = max(0, min(value, maximum))
     filled_segments = round((value / maximum) * segments)
@@ -65,6 +74,8 @@ def make_interface_embed(guild: discord.Guild, state: dict) -> discord.Embed:
     weekly = state.get("weekly", {})
     workforce = state.get("workforce", {})
     active_surge = state.get("active_void_surge")
+    deaths = int(event_store.get(guild.id).get("deaths", 0))
+    nourishment_tier = get_nourishment_tier(state)
 
     week = int(state.get("week", 1))
     food = int(state.get("food", 0))
@@ -93,6 +104,8 @@ def make_interface_embed(guild: discord.Guild, state: dict) -> discord.Embed:
             f"through Week {int(active_surge.get('end_week', week))}\n"
         )
 
+    tier_label = f"{nourishment_tier.get('emoji', '')} {nourishment_tier.get('label', 'Stable')}".strip()
+
     description = (
         "### Resources\n"
         f"**Food:** {food} ({format_change(food_net)}/week)\n"
@@ -102,6 +115,7 @@ def make_interface_embed(guild: discord.Guild, state: dict) -> discord.Embed:
         f"{SEPARATOR}\n"
         "### Population\n"
         f"**Citizens:** {citizens}\n"
+        f"☠️ **Deaths:** {deaths}\n"
         "**Workforce**\n"
         f"🔬 Scientists: {int(workforce.get('scientists', 0))}\n"
         f"🙏 Priestesses: {int(workforce.get('priestesses', 0))}\n"
@@ -112,7 +126,8 @@ def make_interface_embed(guild: discord.Guild, state: dict) -> discord.Embed:
         f"**Growth:** {growth}/728 ({format_change(int(weekly.get('growth', 1)))}/week while children exist)\n\n"
         f"{SEPARATOR}\n"
         "### City Stability\n"
-        f"**Nourishment:** {nourishment}/100 ({format_change(int(weekly.get('nourishment', 0)))}/week)\n"
+        f"**Nourishment:** {nourishment}/100 • {tier_label}\n"
+        f"↳ Manual modifier: {format_change(int(weekly.get('nourishment', 0)))}/week • Food supply adjusts automatically\n"
         f"{progress_bar(nourishment, filled='🟩')}\n"
         f"**Crime:** {crime}/100 ({format_change(int(weekly.get('crime', 0)))}/week)\n"
         f"{progress_bar(crime, filled='🟥')}\n"
@@ -135,22 +150,114 @@ def make_interface_embed(guild: discord.Guild, state: dict) -> discord.Embed:
     return embed
 
 
-async def refresh_saved_interface(guild: discord.Guild, state: dict) -> None:
-    channel_id = state.get("channel_id")
-    message_id = state.get("message_id")
-    if not channel_id or not message_id:
-        return
+def _effect_text(effects: dict) -> str:
+    labels = {
+        "crime": "Crime",
+        "faith": "Faith",
+        "corruption": "Corruption",
+        "birthrate": "Birthrate",
+        "growth": "Growth",
+    }
+    parts = []
+    for key in ("crime", "faith", "corruption", "birthrate", "growth"):
+        value = int(effects.get(key, 0))
+        if value:
+            parts.append(f"{labels[key]} {format_change(value)}")
+    return " • ".join(parts)
 
+
+def make_events_embed(guild: discord.Guild, state: dict, summary: dict | None = None) -> discord.Embed:
+    week = int(state.get("week", 1))
+    sections: list[str] = []
+    summary = summary or {}
+
+    active_surge = state.get("active_void_surge")
+    if isinstance(active_surge, dict):
+        end_week = int(active_surge.get("end_week", week))
+        remaining = max(1, end_week - week + 1)
+        surge_started = summary.get("void_surge")
+        initial_line = ""
+        if isinstance(surge_started, dict):
+            initial_line = f"\n**Initial surge:** {surge_started.get('before', 0)} → **{surge_started.get('after', 0)}**"
+        sections.append(
+            f"### {active_surge.get('title', '🌑 MAJOR VOID SURGE')}\n"
+            f"{active_surge.get('text', '')}\n\n"
+            f"**Surge #{active_surge.get('number', '?')}** • "
+            f"Week {active_surge.get('start_week', '?')}–{end_week}\n"
+            f"**Void Pressure ×{float(active_surge.get('multiplier', 1.0)):.2f}** • "
+            f"{remaining} week{'s' if remaining != 1 else ''} remaining"
+            f"{initial_line}"
+        )
+
+    nourishment_summary = summary.get("nourishment")
+    tier = get_nourishment_tier(state)
+    tier_id = str(tier.get("id", "stable"))
+
+    if isinstance(nourishment_summary, dict):
+        unfed = float(nourishment_summary.get("unfed_percent", 0.0))
+        fed = float(nourishment_summary.get("fed_percent", 100.0))
+        nourishment_change = int(nourishment_summary.get("nourishment_change", 0))
+        if unfed > 0:
+            sections.append(
+                "### 🍽️ FOOD SHORTAGE\n"
+                f"Only **{fed:.1f}%** of the population was fed this week.\n"
+                f"**{unfed:.1f}% unfed** • Nourishment {format_change(nourishment_change)}"
+            )
+
+    if tier_id != "stable":
+        effects = dict(tier)
+        effect_line = _effect_text(effects)
+        lines = [
+            f"### {tier.get('emoji', '')} {tier.get('label', 'Nourishment')}".rstrip(),
+            f"Nourishment is currently **{int(state.get('nourishment', 0))}/100**.",
+        ]
+        if effect_line:
+            lines.append(f"**Weekly effects:** {effect_line}")
+
+        if isinstance(nourishment_summary, dict):
+            starvation = nourishment_summary.get("starvation")
+            if isinstance(starvation, dict):
+                roll = int(starvation.get("roll", 0))
+                dc = int(starvation.get("dc", 16))
+                if starvation.get("passed"):
+                    lines.append(f"**Starvation roll:** {roll} vs DC {dc} • No deaths")
+                else:
+                    deaths = int(starvation.get("deaths", 0))
+                    percent = int(starvation.get("death_percent", 0))
+                    lines.append(
+                        f"**Starvation roll:** {roll} vs DC {dc} • Failed\n"
+                        f"☠️ **{deaths} citizen{'s' if deaths != 1 else ''} died** ({percent}% of population)"
+                    )
+        sections.append("\n".join(lines))
+
+    if not sections:
+        description = "*No active events.*"
+    else:
+        description = f"\n\n{SEPARATOR}\n\n".join(sections)
+
+    embed = discord.Embed(title=f"Aethelgard Events • Week {week}", description=description)
+    embed.set_footer(text=f"Guild: {guild.name} • This message updates as events change")
+    return embed
+
+
+async def _get_text_channel(guild: discord.Guild, channel_id: int | None) -> discord.TextChannel | None:
+    if not channel_id:
+        return None
     channel = guild.get_channel(int(channel_id))
-    if not isinstance(channel, discord.TextChannel):
-        try:
-            fetched = await guild.fetch_channel(int(channel_id))
-        except (discord.NotFound, discord.Forbidden, discord.HTTPException):
-            return
-        if not isinstance(fetched, discord.TextChannel):
-            return
-        channel = fetched
+    if isinstance(channel, discord.TextChannel):
+        return channel
+    try:
+        fetched = await guild.fetch_channel(int(channel_id))
+    except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+        return None
+    return fetched if isinstance(fetched, discord.TextChannel) else None
 
+
+async def refresh_saved_interface(guild: discord.Guild, state: dict) -> None:
+    channel = await _get_text_channel(guild, state.get("channel_id"))
+    message_id = state.get("message_id")
+    if channel is None or not message_id:
+        return
     try:
         message = await channel.fetch_message(int(message_id))
         await message.edit(embed=make_interface_embed(guild, state), view=InterfaceView())
@@ -158,29 +265,33 @@ async def refresh_saved_interface(guild: discord.Guild, state: dict) -> None:
         pass
 
 
-async def delete_void_surge_message(guild: discord.Guild, surge: dict | None) -> None:
-    if not isinstance(surge, dict):
-        return
-    channel_id = surge.get("channel_id")
-    message_id = surge.get("message_id")
-    if not channel_id or not message_id:
-        return
+async def refresh_event_message(
+    guild: discord.Guild,
+    state: dict,
+    summary: dict | None = None,
+    target_channel: discord.TextChannel | None = None,
+) -> None:
+    event_meta = event_store.get(guild.id)
+    saved_channel = await _get_text_channel(guild, event_meta.get("channel_id"))
+    message_id = event_meta.get("message_id")
+    embed = make_events_embed(guild, state, summary)
 
-    channel = guild.get_channel(int(channel_id))
-    if not isinstance(channel, discord.TextChannel):
+    if saved_channel is not None and message_id and (target_channel is None or saved_channel.id == target_channel.id):
         try:
-            fetched = await guild.fetch_channel(int(channel_id))
+            message = await saved_channel.fetch_message(int(message_id))
+            await message.edit(embed=embed)
+            return
         except (discord.NotFound, discord.Forbidden, discord.HTTPException):
-            return
-        if not isinstance(fetched, discord.TextChannel):
-            return
-        channel = fetched
+            pass
 
+    channel = target_channel or await _get_text_channel(guild, state.get("channel_id"))
+    if channel is None:
+        return
     try:
-        message = await channel.fetch_message(int(message_id))
-        await message.delete()
-    except (discord.NotFound, discord.Forbidden, discord.HTTPException):
-        pass
+        message = await channel.send(embed=embed)
+    except (discord.Forbidden, discord.HTTPException):
+        return
+    event_store.set_message(guild.id, channel.id, message.id)
 
 
 def vote_counts(vote: dict) -> tuple[int, int, int, float]:
@@ -217,7 +328,12 @@ class WeeklyResourcesModal(discord.ui.Modal, title="Weekly Resources"):
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         try:
-            state = store.set_weekly_group(interaction.guild.id, food=int(str(self.food)), materials=int(str(self.materials)), cum=int(str(self.cum)))
+            state = store.set_weekly_group(
+                interaction.guild.id,
+                food=int(str(self.food)),
+                materials=int(str(self.materials)),
+                cum=int(str(self.cum)),
+            )
         except (ValueError, AttributeError):
             await interaction.response.send_message("All values must be whole numbers.", ephemeral=True)
             return
@@ -236,7 +352,11 @@ class WeeklyPopulationModal(discord.ui.Modal, title="Weekly Population"):
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         try:
-            state = store.set_weekly_group(interaction.guild.id, birthrate=int(str(self.birthrate)), growth=int(str(self.growth)))
+            state = store.set_weekly_group(
+                interaction.guild.id,
+                birthrate=int(str(self.birthrate)),
+                growth=int(str(self.growth)),
+            )
         except (ValueError, AttributeError):
             await interaction.response.send_message("All values must be whole numbers.", ephemeral=True)
             return
@@ -248,7 +368,7 @@ class WeeklyStabilityModal(discord.ui.Modal, title="Weekly City Stability"):
     def __init__(self, state: dict) -> None:
         super().__init__()
         weekly = state.get("weekly", {})
-        self.nourishment = discord.ui.TextInput(label="Nourishment / week", default=str(weekly.get("nourishment", 0)), required=True)
+        self.nourishment = discord.ui.TextInput(label="Nourishment modifier / week", default=str(weekly.get("nourishment", 0)), required=True)
         self.crime = discord.ui.TextInput(label="Crime / week", default=str(weekly.get("crime", 0)), required=True)
         self.faith = discord.ui.TextInput(label="Faith / week", default=str(weekly.get("faith", 0)), required=True)
         for item in (self.nourishment, self.crime, self.faith):
@@ -256,7 +376,12 @@ class WeeklyStabilityModal(discord.ui.Modal, title="Weekly City Stability"):
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         try:
-            state = store.set_weekly_group(interaction.guild.id, nourishment=int(str(self.nourishment)), crime=int(str(self.crime)), faith=int(str(self.faith)))
+            state = store.set_weekly_group(
+                interaction.guild.id,
+                nourishment=int(str(self.nourishment)),
+                crime=int(str(self.crime)),
+                faith=int(str(self.faith)),
+            )
         except (ValueError, AttributeError):
             await interaction.response.send_message("All values must be whole numbers.", ephemeral=True)
             return
@@ -276,7 +401,12 @@ class WeeklyVoidModal(discord.ui.Modal, title="Weekly Barrier & Void"):
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         try:
-            state = store.set_weekly_group(interaction.guild.id, barrier=int(str(self.barrier)), void_pressure=int(str(self.void_pressure)), corruption=int(str(self.corruption)))
+            state = store.set_weekly_group(
+                interaction.guild.id,
+                barrier=int(str(self.barrier)),
+                void_pressure=int(str(self.void_pressure)),
+                corruption=int(str(self.corruption)),
+            )
         except (ValueError, AttributeError):
             await interaction.response.send_message("All values must be whole numbers.", ephemeral=True)
             return
@@ -352,7 +482,9 @@ class WorkforceRatioContinueView(discord.ui.View):
     @discord.ui.button(label="Continue to Ratios", style=discord.ButtonStyle.primary)
     async def continue_to_ratios(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         del button
-        await interaction.response.send_modal(WorkforceRatioModal(self.owner_id, self.minimum, self.ratio_defaults, self.priority_defaults))
+        await interaction.response.send_modal(
+            WorkforceRatioModal(self.owner_id, self.minimum, self.ratio_defaults, self.priority_defaults)
+        )
 
 
 class WorkforceRatioModal(discord.ui.Modal, title="Workforce Ratios"):
@@ -416,7 +548,9 @@ class WorkforcePriorityContinueView(discord.ui.View):
     @discord.ui.button(label="Continue to Priority", style=discord.ButtonStyle.primary)
     async def continue_to_priority(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         del button
-        await interaction.response.send_modal(WorkforcePriorityModal(self.owner_id, self.minimum, self.ratio, self.priority_defaults))
+        await interaction.response.send_modal(
+            WorkforcePriorityModal(self.owner_id, self.minimum, self.ratio, self.priority_defaults)
+        )
 
 
 class WorkforcePriorityModal(discord.ui.Modal, title="Workforce Priority"):
@@ -455,7 +589,12 @@ class WorkforcePriorityModal(discord.ui.Modal, title="Workforce Priority"):
 
         priority = [role for role, rank in sorted(ranks.items(), key=lambda item: item[1])]
         try:
-            state = store.set_workforce_policy(interaction.guild.id, minimum=self.minimum, ratio=self.ratio, priority=priority)
+            state = store.set_workforce_policy(
+                interaction.guild.id,
+                minimum=self.minimum,
+                ratio=self.ratio,
+                priority=priority,
+            )
         except ValueError as exc:
             await interaction.response.send_message(str(exc), ephemeral=True)
             return
@@ -468,7 +607,11 @@ class DifficultySelect(discord.ui.Select):
     def __init__(self) -> None:
         difficulties = list_difficulties()
         options = [
-            discord.SelectOption(label=item["name"], value=item["id"], description=(item.get("description") or None))
+            discord.SelectOption(
+                label=item["name"],
+                value=item["id"],
+                description=(item.get("description") or None),
+            )
             for item in difficulties
         ]
         if not options:
@@ -485,13 +628,15 @@ class DifficultySelect(discord.ui.Select):
         if interaction.guild is None:
             return
 
-        old_state = store.get(interaction.guild.id) or {}
-        old_surge = old_state.get("active_void_surge")
         difficulty_id = self.values[0]
         state = store.reset_game(interaction.guild.id, difficulty_id)
-        await interaction.response.edit_message(content=f"New game started on **{difficulty_id.title()}** difficulty.", view=None)
+        event_store.reset(interaction.guild.id)
+        await interaction.response.edit_message(
+            content=f"New game started on **{difficulty_id.title()}** difficulty.",
+            view=None,
+        )
         await refresh_saved_interface(interaction.guild, state)
-        await delete_void_surge_message(interaction.guild, old_surge)
+        await refresh_event_message(interaction.guild, state)
 
 
 class DifficultyResetView(discord.ui.View):
@@ -533,7 +678,10 @@ class VoteView(discord.ui.View):
             await interaction.response.send_message("This vote could not be found.", ephemeral=True)
             return
         if interaction.user.id != int(vote.get("creator_id", 0)) and not user_can_manage_guild(interaction):
-            await interaction.response.send_message("Only the vote creator or someone with **Manage Server** can conclude it.", ephemeral=True)
+            await interaction.response.send_message(
+                "Only the vote creator or someone with **Manage Server** can conclude it.",
+                ephemeral=True,
+            )
             return
         _, _, total, percentage = vote_counts(vote)
         passed = total > 0 and percentage >= int(vote.get("required_percentage", 60))
@@ -549,39 +697,40 @@ class InterfaceView(discord.ui.View):
     async def advance_week(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         del button
         if not user_can_manage_guild(interaction):
-            await interaction.response.send_message("You need the **Manage Server** permission to advance the week.", ephemeral=True)
+            await interaction.response.send_message(
+                "You need the **Manage Server** permission to advance the week.",
+                ephemeral=True,
+            )
             return
         if interaction.guild is None:
             return
 
+        before_state = store.get(interaction.guild.id) or dict(DEFAULT_GAME_STATE)
         state, summary = store.advance_week(interaction.guild.id)
+        state, nourishment_summary = apply_food_nourishment_week(
+            store,
+            interaction.guild.id,
+            before_state,
+            state,
+        )
+        summary["nourishment"] = nourishment_summary
+
+        deaths = int(nourishment_summary.get("deaths", 0))
+        if deaths:
+            event_store.add_deaths(interaction.guild.id, deaths)
+
         await interaction.response.edit_message(embed=make_interface_embed(interaction.guild, state), view=self)
-
-        expired = summary.get("expired_void_surge")
-        if expired:
-            await delete_void_surge_message(interaction.guild, expired)
-
-        surge = summary.get("void_surge")
-        if surge and interaction.channel is not None:
-            embed = discord.Embed(
-                title=str(surge.get("title", "🌑 MAJOR VOID SURGE")),
-                description=(
-                    f"{surge.get('text', '')}\n\n"
-                    f"**Major Void Surge #{surge.get('number', '?')}**\n"
-                    f"**Duration:** {surge.get('duration_weeks', 5)} weeks "
-                    f"(Week {surge.get('start_week', '?')}–{surge.get('end_week', '?')})\n"
-                    f"**Void Pressure:** ×{float(surge.get('multiplier', 1.0)):.2f} while active\n"
-                    f"**Initial surge:** {surge.get('before', 0)} → **{surge.get('after', 0)}**"
-                ),
-            )
-            message = await interaction.channel.send(embed=embed)
-            store.set_void_surge_message(interaction.guild.id, message.channel.id, message.id)
+        target_channel = interaction.channel if isinstance(interaction.channel, discord.TextChannel) else None
+        await refresh_event_message(interaction.guild, state, summary, target_channel=target_channel)
 
     @discord.ui.button(label="Reset Game", style=discord.ButtonStyle.danger, custom_id="aethelgard:reset_game")
     async def reset_game(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         del button
         if not user_can_manage_guild(interaction):
-            await interaction.response.send_message("You need the **Manage Server** permission to reset the game.", ephemeral=True)
+            await interaction.response.send_message(
+                "You need the **Manage Server** permission to reset the game.",
+                ephemeral=True,
+            )
             return
         await interaction.response.send_message(
             "Choose the difficulty for the new game:",
@@ -637,8 +786,9 @@ async def setup_interface(interaction: discord.Interaction, channel: discord.Tex
     if message is None:
         message = await target_channel.send(embed=make_interface_embed(interaction.guild, state), view=view)
 
-    store.set(interaction.guild.id, target_channel.id, message.id)
-    await interaction.followup.send("Interface panel ready.", ephemeral=True)
+    state = store.set(interaction.guild.id, target_channel.id, message.id)
+    await refresh_event_message(interaction.guild, state, target_channel=target_channel)
+    await interaction.followup.send("Interface and event panels ready.", ephemeral=True)
 
 
 async def open_weekly_modal(interaction: discord.Interaction, modal: discord.ui.Modal) -> None:
@@ -651,25 +801,37 @@ async def open_weekly_modal(interaction: discord.Interaction, modal: discord.ui.
 @bot.tree.command(name="weekly_resources", description="Edit weekly Food, Materials, and Cum.")
 @app_commands.checks.has_permissions(manage_guild=True)
 async def weekly_resources(interaction: discord.Interaction) -> None:
-    await open_weekly_modal(interaction, WeeklyResourcesModal(store.get(interaction.guild.id) or dict(DEFAULT_GAME_STATE)))
+    await open_weekly_modal(
+        interaction,
+        WeeklyResourcesModal(store.get(interaction.guild.id) or dict(DEFAULT_GAME_STATE)),
+    )
 
 
 @bot.tree.command(name="weekly_population", description="Edit weekly Birthrate and Growth.")
 @app_commands.checks.has_permissions(manage_guild=True)
 async def weekly_population(interaction: discord.Interaction) -> None:
-    await open_weekly_modal(interaction, WeeklyPopulationModal(store.get(interaction.guild.id) or dict(DEFAULT_GAME_STATE)))
+    await open_weekly_modal(
+        interaction,
+        WeeklyPopulationModal(store.get(interaction.guild.id) or dict(DEFAULT_GAME_STATE)),
+    )
 
 
-@bot.tree.command(name="weekly_stability", description="Edit weekly Nourishment, Crime, and Faith.")
+@bot.tree.command(name="weekly_stability", description="Edit Nourishment modifier, Crime, and Faith.")
 @app_commands.checks.has_permissions(manage_guild=True)
 async def weekly_stability(interaction: discord.Interaction) -> None:
-    await open_weekly_modal(interaction, WeeklyStabilityModal(store.get(interaction.guild.id) or dict(DEFAULT_GAME_STATE)))
+    await open_weekly_modal(
+        interaction,
+        WeeklyStabilityModal(store.get(interaction.guild.id) or dict(DEFAULT_GAME_STATE)),
+    )
 
 
 @bot.tree.command(name="weekly_void", description="Edit Barrier generation, extra Void Pressure, and Corruption.")
 @app_commands.checks.has_permissions(manage_guild=True)
 async def weekly_void(interaction: discord.Interaction) -> None:
-    await open_weekly_modal(interaction, WeeklyVoidModal(store.get(interaction.guild.id) or dict(DEFAULT_GAME_STATE)))
+    await open_weekly_modal(
+        interaction,
+        WeeklyVoidModal(store.get(interaction.guild.id) or dict(DEFAULT_GAME_STATE)),
+    )
 
 
 @bot.tree.command(name="workforce_setup", description="Configure workforce minimums, ratios, and priority.")
@@ -706,22 +868,35 @@ async def addresource(interaction: discord.Interaction, resource_type: app_comma
         return
     state, summary = store.add_resource(interaction.guild.id, resource_type.value, value)
     await refresh_saved_interface(interaction.guild, state)
+    await refresh_event_message(interaction.guild, state)
+
     text = f"**{resource_type.name}** changed by **{format_change(value)}**. Current: **{state[resource_type.value]}**."
     if summary["births"]:
         text += f" Created {summary['births']} child(ren)."
     if summary["matured"]:
         text += f" Matured {summary['matured']} child(ren)."
         assigned = summary.get("workforce_added", {})
-        parts = [f"{ROLE_LABELS[role]} +{assigned.get(role, 0)}" for role in WORKFORCE_ROLES if assigned.get(role, 0)]
+        parts = [
+            f"{ROLE_LABELS[role]} +{assigned.get(role, 0)}"
+            for role in WORKFORCE_ROLES
+            if assigned.get(role, 0)
+        ]
         if parts:
             text += " " + ", ".join(parts) + "."
     await interaction.response.send_message(text, ephemeral=True)
 
 
 @bot.tree.command(name="vote", description="Create a simple Pro/Con vote with a required approval percentage.")
-async def vote(interaction: discord.Interaction, topic: str, required_percentage: app_commands.Range[int, 1, 100] = 60) -> None:
+async def vote(
+    interaction: discord.Interaction,
+    topic: str,
+    required_percentage: app_commands.Range[int, 1, 100] = 60,
+) -> None:
     if interaction.guild is None or not isinstance(interaction.channel, discord.TextChannel):
-        await interaction.response.send_message("This command can only be used in a server text channel.", ephemeral=True)
+        await interaction.response.send_message(
+            "This command can only be used in a server text channel.",
+            ephemeral=True,
+        )
         return
 
     await interaction.response.defer(ephemeral=True)
@@ -751,7 +926,15 @@ async def admin_error(interaction: discord.Interaction, error: app_commands.AppC
         await interaction.response.send_message(message, ephemeral=True)
 
 
-for command in (setup_interface, weekly_resources, weekly_population, weekly_stability, weekly_void, workforce_setup, addresource):
+for command in (
+    setup_interface,
+    weekly_resources,
+    weekly_population,
+    weekly_stability,
+    weekly_void,
+    workforce_setup,
+    addresource,
+):
     command.error(admin_error)
 
 
